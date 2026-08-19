@@ -126,6 +126,28 @@ for (const file of packFiles) {
     fail(file, `references unknown dialect "${pack.dialect}"`)
   }
 
+  // JavaScript has no inline regex flags, so a PCRE style (?i) prefix compiles
+  // nowhere and would silently never match.
+  const pathHint = pack.match?.pathHint
+  if (pathHint) {
+    if (pathHint.startsWith("(?i)")) {
+      fail(file, "pathHint must not use the (?i) inline flag; matching is already case insensitive")
+    }
+    try {
+      new RegExp(pathHint, "i")
+    } catch (error) {
+      fail(file, `pathHint is not a valid JavaScript regular expression: ${error.message}`)
+    }
+  }
+
+  for (const pattern of pack.match?.urlPatterns ?? []) {
+    try {
+      new RegExp(pattern)
+    } catch (error) {
+      fail(file, `urlPattern is not a valid JavaScript regular expression: ${error.message}`)
+    }
+  }
+
   const groupPaths = collectGroupPaths(pack.groups)
   const variableIds = new Set((pack.variables ?? []).map((variable) => variable.id))
   const templateIds = new Set()

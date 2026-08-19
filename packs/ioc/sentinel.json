@@ -9,21 +9,55 @@
   "version": "2026-08-19",
   "license": "MIT",
   "match": {
-    "hostnames": ["portal.azure.com"],
-    "pathHint": "(?i)(sentinel|SecurityInsights)"
+    "hostnames": [
+      "portal.azure.com"
+    ],
+    "pathHint": "(sentinel|SecurityInsights)"
   },
   "variables": [
-    { "id": "range", "label": "Time range", "default": "7d", "options": ["24h", "7d", "30d", "90d"] }
+    {
+      "id": "range",
+      "label": "Time range",
+      "default": "7d",
+      "options": [
+        "24h",
+        "7d",
+        "30d",
+        "90d"
+      ]
+    }
   ],
   "groups": [
-    { "id": "network", "label": "Network", "order": 10,
+    {
+      "id": "network",
+      "label": "Network",
+      "order": 10,
       "children": [
-        { "id": "perimeter", "label": "Perimeter and proxy" },
-        { "id": "dns", "label": "DNS" }
-      ] },
-    { "id": "identity", "label": "Identity", "order": 20 },
-    { "id": "endpoint", "label": "Endpoint", "order": 30 },
-    { "id": "broad", "label": "Broad search", "order": 90 }
+        {
+          "id": "perimeter",
+          "label": "Perimeter and proxy"
+        },
+        {
+          "id": "dns",
+          "label": "DNS"
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "label": "Identity",
+      "order": 20
+    },
+    {
+      "id": "endpoint",
+      "label": "Endpoint",
+      "order": 30
+    },
+    {
+      "id": "broad",
+      "label": "Broad search",
+      "order": 90
+    }
   ],
   "templates": [
     {
@@ -32,9 +66,18 @@
       "group": "network/perimeter",
       "description": "Firewall, proxy and IDS logs normalised into CommonSecurityLog. Covers both directions for IP indicators.",
       "byType": {
-        "IP": { "field": "DestinationIP", "op": "in~" },
-        "Domain": { "field": "RequestURL", "op": "has_any" },
-        "URL": { "field": "RequestURL", "op": "has_any" }
+        "IP": {
+          "field": "DestinationIP",
+          "op": "in~"
+        },
+        "Domain": {
+          "field": "RequestURL",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "RequestURL",
+          "op": "has_any"
+        }
       },
       "body": "CommonSecurityLog\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project TimeGenerated, DeviceVendor, DeviceProduct, Activity, SourceIP, SourceUserName,\n          DestinationIP, DestinationPort, RequestURL, DeviceAction\n| sort by TimeGenerated desc"
     },
@@ -44,7 +87,10 @@
       "group": "network/perimeter",
       "description": "Use this one when the indicator could be the source of an inbound attack rather than a destination.",
       "byType": {
-        "IP": { "field": "SourceIP", "op": "in~" }
+        "IP": {
+          "field": "SourceIP",
+          "op": "in~"
+        }
       },
       "body": "CommonSecurityLog\n| where TimeGenerated > ago({{var:range}})\n| where SourceIP in~ ({{iocs}}) or DestinationIP in~ ({{iocs}})\n| summarize Events = count(), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated),\n            Actions = make_set(DeviceAction, 10), Ports = make_set(DestinationPort, 20)\n          by SourceIP, DestinationIP, DeviceProduct\n| sort by Events desc"
     },
@@ -54,8 +100,14 @@
       "group": "network/dns",
       "description": "Which internal clients resolved the indicators. Requires the DNS or Sysmon connector.",
       "byType": {
-        "Domain": { "field": "Name", "op": "has_any" },
-        "URL": { "field": "Name", "op": "has_any" }
+        "Domain": {
+          "field": "Name",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "Name",
+          "op": "has_any"
+        }
       },
       "body": "DnsEvents\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project TimeGenerated, Computer, ClientIP, Name, QueryType, ResultCode, IPAddresses\n| sort by TimeGenerated desc"
     },
@@ -65,7 +117,10 @@
       "group": "identity",
       "description": "Interactive sign-ins sourced from the indicators, with result code and conditional access outcome.",
       "byType": {
-        "IP": { "field": "IPAddress", "op": "in~" }
+        "IP": {
+          "field": "IPAddress",
+          "op": "in~"
+        }
       },
       "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project TimeGenerated, UserPrincipalName, AppDisplayName, IPAddress,\n          Location = strcat(tostring(LocationDetails.countryOrRegion), \" / \", tostring(LocationDetails.city)),\n          ResultType, ResultDescription, ConditionalAccessStatus, UserAgent\n| sort by TimeGenerated desc"
     },
@@ -75,7 +130,10 @@
       "group": "identity",
       "description": "Collapses the sign-in noise into successes versus failures per account, which is how you spot a successful password spray.",
       "byType": {
-        "IP": { "field": "IPAddress", "op": "in~" }
+        "IP": {
+          "field": "IPAddress",
+          "op": "in~"
+        }
       },
       "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| summarize Attempts = count(),\n            Successes = countif(ResultType == \"0\"),\n            Failures = countif(ResultType != \"0\"),\n            Apps = make_set(AppDisplayName, 10),\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\n          by UserPrincipalName, IPAddress\n| where Successes > 0\n| sort by Successes desc"
     },
@@ -85,7 +143,10 @@
       "group": "identity",
       "description": "Mailbox and SharePoint operations performed from the indicators — the follow-up query after a confirmed account compromise.",
       "byType": {
-        "IP": { "field": "ClientIP", "op": "in~" }
+        "IP": {
+          "field": "ClientIP",
+          "op": "in~"
+        }
       },
       "body": "OfficeActivity\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project TimeGenerated, UserId, Operation, OfficeWorkload, ClientIP, ResultStatus, Parameters\n| sort by TimeGenerated desc"
     },
@@ -95,9 +156,18 @@
       "group": "endpoint",
       "description": "Sysmon process creation carries the hash in the event data; this catches it without an EDR connector.",
       "byType": {
-        "SHA256": { "field": "EventData", "op": "has_any" },
-        "SHA1": { "field": "EventData", "op": "has_any" },
-        "MD5": { "field": "EventData", "op": "has_any" }
+        "SHA256": {
+          "field": "EventData",
+          "op": "has_any"
+        },
+        "SHA1": {
+          "field": "EventData",
+          "op": "has_any"
+        },
+        "MD5": {
+          "field": "EventData",
+          "op": "has_any"
+        }
       },
       "body": "SecurityEvent\n| where TimeGenerated > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project TimeGenerated, Computer, Account, EventID, Activity, Process, CommandLine\n| sort by TimeGenerated desc"
     },
@@ -107,10 +177,22 @@
       "group": "broad",
       "description": "Checks the workspace TI table before hunting, so you know whether an analytics rule should already have fired.",
       "byType": {
-        "IP": { "field": "NetworkIP", "op": "in~" },
-        "Domain": { "field": "DomainName", "op": "in~" },
-        "URL": { "field": "Url", "op": "in~" },
-        "SHA256": { "field": "FileHashValue", "op": "in~" }
+        "IP": {
+          "field": "NetworkIP",
+          "op": "in~"
+        },
+        "Domain": {
+          "field": "DomainName",
+          "op": "in~"
+        },
+        "URL": {
+          "field": "Url",
+          "op": "in~"
+        },
+        "SHA256": {
+          "field": "FileHashValue",
+          "op": "in~"
+        }
       },
       "body": "ThreatIntelligenceIndicator\n| where TimeGenerated > ago(30d)\n| where {{field}} {{op}} ({{iocs}})\n| where Active == true\n| project TimeGenerated, Description, ThreatType, ConfidenceScore, SourceSystem, ExpirationDateTime, {{field}}\n| sort by TimeGenerated desc"
     },
@@ -120,11 +202,26 @@
       "group": "broad",
       "description": "Last resort sweep across the whole workspace. Expensive: narrow the time range before running it.",
       "byType": {
-        "IP": { "field": "*", "op": "has_any" },
-        "Domain": { "field": "*", "op": "has_any" },
-        "URL": { "field": "*", "op": "has_any" },
-        "SHA256": { "field": "*", "op": "has_any" },
-        "Email": { "field": "*", "op": "has_any" }
+        "IP": {
+          "field": "*",
+          "op": "has_any"
+        },
+        "Domain": {
+          "field": "*",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "*",
+          "op": "has_any"
+        },
+        "SHA256": {
+          "field": "*",
+          "op": "has_any"
+        },
+        "Email": {
+          "field": "*",
+          "op": "has_any"
+        }
       },
       "body": "search {{iocs|or-terms}}\n| where TimeGenerated > ago({{var:range}})\n| summarize Hits = count(), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated) by $table\n| sort by Hits desc"
     }

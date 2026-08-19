@@ -9,22 +9,59 @@
   "version": "2026-08-19",
   "license": "MIT",
   "match": {
-    "hostnames": ["portal.azure.com"],
-    "pathHint": "(?i)(sentinel|SecurityInsights)"
+    "hostnames": [
+      "portal.azure.com"
+    ],
+    "pathHint": "(sentinel|SecurityInsights)"
   },
   "variables": [
-    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] }
+    {
+      "id": "range",
+      "label": "Time range",
+      "default": "24h",
+      "options": [
+        "1h",
+        "24h",
+        "7d",
+        "30d"
+      ]
+    }
   ],
   "groups": [
-    { "id": "identity", "label": "Identity", "order": 10,
+    {
+      "id": "identity",
+      "label": "Identity",
+      "order": 10,
       "children": [
-        { "id": "bruteforce", "label": "Brute force and spray" },
-        { "id": "anomaly", "label": "Anomalies" },
-        { "id": "privilege", "label": "Privilege" }
-      ] },
-    { "id": "email", "label": "Email and collaboration", "order": 20 },
-    { "id": "cloud", "label": "Cloud resources", "order": 30 },
-    { "id": "hygiene", "label": "Hygiene", "order": 40 }
+        {
+          "id": "bruteforce",
+          "label": "Brute force and spray"
+        },
+        {
+          "id": "anomaly",
+          "label": "Anomalies"
+        },
+        {
+          "id": "privilege",
+          "label": "Privilege"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "label": "Email and collaboration",
+      "order": 20
+    },
+    {
+      "id": "cloud",
+      "label": "Cloud resources",
+      "order": 30
+    },
+    {
+      "id": "hygiene",
+      "label": "Hygiene",
+      "order": 40
+    }
   ],
   "templates": [
     {
