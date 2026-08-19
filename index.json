@@ -1,0 +1,137 @@
+{
+  "schema": "socx.packindex/v1",
+  "name": "SOCx community query packs",
+  "description": "Default catalogue shipped with the SOCx browser extension. Every entry points at a self contained pack file; the extension fetches only the ones the analyst enables.",
+  "homepage": "https://github.com/AlessioMobilia/socx-query-packs",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "dialects": "dialects/dialects.json",
+  "packs": [
+    {
+      "id": "defender-xdr-ioc",
+      "kind": "ioc",
+      "name": "Microsoft Defender XDR — IOC hunting",
+      "dialect": "kql",
+      "path": "packs/ioc/defender-xdr.json",
+      "templates": 12,
+      "verified": true
+    },
+    {
+      "id": "sentinel-ioc",
+      "kind": "ioc",
+      "name": "Microsoft Sentinel — IOC hunting",
+      "dialect": "kql",
+      "path": "packs/ioc/sentinel.json",
+      "templates": 9,
+      "verified": true
+    },
+    {
+      "id": "splunk-ioc",
+      "kind": "ioc",
+      "name": "Splunk — IOC hunting",
+      "dialect": "spl",
+      "path": "packs/ioc/splunk.json",
+      "templates": 9,
+      "verified": true
+    },
+    {
+      "id": "chronicle-ioc",
+      "kind": "ioc",
+      "name": "Google SecOps (Chronicle) — IOC hunting",
+      "dialect": "udm",
+      "path": "packs/ioc/chronicle.json",
+      "templates": 9,
+      "verified": true
+    },
+    {
+      "id": "crowdstrike-logscale-ioc",
+      "kind": "ioc",
+      "name": "CrowdStrike Falcon LogScale / NG-SIEM — IOC hunting",
+      "dialect": "logscale",
+      "path": "packs/ioc/crowdstrike-logscale.json",
+      "templates": 7,
+      "verified": true
+    },
+    {
+      "id": "cortex-xdr-ioc",
+      "kind": "ioc",
+      "name": "Palo Alto Cortex XDR / XSIAM — IOC hunting",
+      "dialect": "xql",
+      "path": "packs/ioc/cortex-xdr.json",
+      "templates": 6,
+      "verified": true
+    },
+    {
+      "id": "elastic-ioc",
+      "kind": "ioc",
+      "name": "Elastic Security — IOC hunting",
+      "dialect": "esql",
+      "path": "packs/ioc/elastic.json",
+      "templates": 6,
+      "verified": true
+    },
+    {
+      "id": "fortisiem-ioc",
+      "kind": "ioc",
+      "name": "FortiSIEM — IOC hunting",
+      "dialect": "fortisiem",
+      "path": "packs/ioc/fortisiem.json",
+      "templates": 5,
+      "verified": false
+    },
+    {
+      "id": "trend-vision-one-ioc",
+      "kind": "ioc",
+      "name": "Trend Vision One — IOC hunting",
+      "dialect": "trend-v1",
+      "path": "packs/ioc/trend-vision-one.json",
+      "templates": 7,
+      "verified": false
+    },
+    {
+      "id": "misc-platforms-ioc",
+      "kind": "ioc",
+      "name": "Other platforms — IOC starters",
+      "dialect": "multiple",
+      "path": "packs/ioc/misc-platforms.json",
+      "templates": 19,
+      "verified": false
+    },
+    {
+      "id": "defender-xdr-standard",
+      "kind": "standard",
+      "name": "Microsoft Defender XDR — hunting playbook",
+      "dialect": "kql",
+      "path": "packs/standard/defender-xdr.json",
+      "templates": 16,
+      "verified": true
+    },
+    {
+      "id": "sentinel-standard",
+      "kind": "standard",
+      "name": "Microsoft Sentinel — hunting playbook",
+      "dialect": "kql",
+      "path": "packs/standard/sentinel.json",
+      "templates": 12,
+      "verified": true
+    },
+    {
+      "id": "splunk-standard",
+      "kind": "standard",
+      "name": "Splunk — hunting playbook",
+      "dialect": "spl",
+      "path": "packs/standard/splunk.json",
+      "templates": 11,
+      "verified": true
+    },
+    {
+      "id": "multi-platform-standard",
+      "kind": "standard",
+      "name": "Chronicle, CrowdStrike, Cortex, Elastic — hunting playbook",
+      "dialect": "multiple",
+      "path": "packs/standard/multi-platform.json",
+      "templates": 11,
+      "verified": false
+    }
+  ]
+}

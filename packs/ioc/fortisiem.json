@@ -1,0 +1,70 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "fortisiem-ioc",
+  "kind": "ioc",
+  "name": "FortiSIEM — IOC hunting",
+  "description": "Analytics filter conditions for FortiSIEM. Attribute names vary between releases and between parsers: validate each template against your own event attribute list before you rely on it.",
+  "vendor": "Fortinet",
+  "dialect": "fortisiem",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "verified": false,
+  "match": {
+    "note": "FortiSIEM supervisors run on internal hostnames; add yours as a custom target in SOCx settings."
+  },
+  "variables": [],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10 },
+    { "id": "endpoint", "label": "Endpoint", "order": 20 },
+    { "id": "identity", "label": "Identity", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "dest-ip",
+      "name": "Traffic towards the IP addresses",
+      "group": "network",
+      "description": "Destination side of the flow, as reported by firewalls and network sensors.",
+      "byType": { "IP": { "field": "destIpAddr", "op": "IN" } },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "any-ip",
+      "name": "Traffic in either direction",
+      "group": "network",
+      "description": "Use when the indicator may be the source of an inbound attack.",
+      "byType": { "IP": { "field": "destIpAddr", "op": "IN" } },
+      "body": "destIpAddr {{op}} ({{iocs}}) OR srcIpAddr {{op}} ({{iocs}})"
+    },
+    {
+      "id": "http-url",
+      "name": "Web requests containing the domains",
+      "group": "network",
+      "description": "Proxy and web filter events. CONTAIN is used so that a domain also matches inside a full URL.",
+      "byType": {
+        "Domain": { "field": "httpUrl", "op": "CONTAIN" },
+        "URL": { "field": "httpUrl", "op": "CONTAIN" }
+      },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "file-hash",
+      "name": "Events referencing the hashes",
+      "group": "endpoint",
+      "description": "Endpoint and antivirus events that carry a file hash attribute.",
+      "byType": {
+        "SHA256": { "field": "hashCode", "op": "IN" },
+        "SHA1": { "field": "hashCode", "op": "IN" },
+        "MD5": { "field": "hashCode", "op": "IN" }
+      },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "source-ip-auth",
+      "name": "Authentications from the IP addresses",
+      "group": "identity",
+      "description": "Combine with an event type filter for logon success or failure in the Analytics editor.",
+      "byType": { "IP": { "field": "srcIpAddr", "op": "IN" } },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    }
+  ]
+}

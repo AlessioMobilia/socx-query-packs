@@ -1,0 +1,172 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/AlessioMobilia/socx-query-packs/main/schema/querypack.schema.json",
+  "title": "SOCx query pack",
+  "description": "A self contained collection of query templates for one query language. Packs are pure data: they contain no executable code, and the escape strategy is chosen from a fixed list implemented inside the extension.",
+  "type": "object",
+  "required": ["schema", "id", "kind", "name", "dialect", "templates"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": { "const": "socx.querypack/v1" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{1,63}$",
+      "description": "Stable identifier, unique within a source. Used for namespacing and precedence."
+    },
+    "kind": {
+      "enum": ["ioc", "standard"],
+      "description": "ioc packs are parameterised on a list of indicators; standard packs are indicator free hunting queries."
+    },
+    "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "description": { "type": "string", "maxLength": 2000 },
+    "vendor": { "type": "string", "maxLength": 120 },
+    "author": { "type": "string", "maxLength": 120 },
+    "homepage": { "type": "string", "format": "uri" },
+    "dialect": {
+      "type": "string",
+      "description": "Default dialect id for every template. A template may override it. Use \"multiple\" in the index when templates differ."
+    },
+    "version": { "type": "string", "maxLength": 40 },
+    "license": { "type": "string", "maxLength": 40 },
+    "verified": {
+      "type": "boolean",
+      "description": "false marks a pack whose field names have not been validated against a live tenant."
+    },
+    "match": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the extension recognises the console this pack belongs to, used to filter the palette and the context menu.",
+      "properties": {
+        "hostnames": { "type": "array", "items": { "type": "string" } },
+        "urlPatterns": { "type": "array", "items": { "type": "string" } },
+        "pathHint": { "type": "string", "description": "Regular expression matched against the page path." },
+        "note": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "targets": {
+      "type": "array",
+      "description": "Named console instances. Used for multi tenant and MSSP setups.",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+          "label": { "type": "string", "maxLength": 120 },
+          "baseUrl": { "type": "string", "format": "uri" },
+          "tenant": { "type": "string", "maxLength": 120 }
+        }
+      }
+    },
+    "variables": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,63}$" },
+          "label": { "type": "string", "maxLength": 120 },
+          "default": { "type": "string" },
+          "options": { "type": "array", "items": { "type": "string" } },
+          "description": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "groups": {
+      "type": "array",
+      "description": "Custom menu hierarchy. Two levels are supported: a group and its children. Templates reference a group by the path \"parent/child\".",
+      "items": { "$ref": "#/$defs/group" }
+    },
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/template" }
+    }
+  },
+  "$defs": {
+    "group": {
+      "type": "object",
+      "required": ["id", "label"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+        "label": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 500 },
+        "order": { "type": "integer", "description": "Lower numbers sort first. Groups without an order sort alphabetically after the ordered ones." },
+        "children": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "label"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+              "label": { "type": "string", "maxLength": 80 },
+              "description": { "type": "string", "maxLength": 500 },
+              "order": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "typeBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How one indicator type maps onto the data model: which table it lives in, which field carries it and which operator compares it.",
+      "properties": {
+        "table": { "type": "string", "maxLength": 200 },
+        "field": { "type": "string", "maxLength": 200 },
+        "op": { "type": "string", "maxLength": 40 },
+        "note": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "template": {
+      "type": "object",
+      "required": ["id", "name", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "group": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}(/[a-z0-9][a-z0-9-]{0,63})?$",
+          "description": "Group path. Templates pointing at an undeclared group are still shown, under a group synthesised from the path."
+        },
+        "tags": { "type": "array", "items": { "type": "string", "maxLength": 40 } },
+        "dialect": { "type": "string", "description": "Overrides the pack dialect for this template only." },
+        "requiresIocs": {
+          "type": "boolean",
+          "default": true,
+          "description": "false for standard hunting queries that take no indicator."
+        },
+        "byType": {
+          "type": "object",
+          "description": "Per indicator type bindings. Keys are IOC types: IP, Domain, URL, Email, ASN, MAC, CVE, SHA256, SHA1, MD5.",
+          "propertyNames": {
+            "enum": ["IP", "Domain", "URL", "Email", "ASN", "MAC", "CVE", "Hash", "SHA256", "SHA1", "MD5"]
+          },
+          "additionalProperties": { "$ref": "#/$defs/typeBinding" }
+        },
+        "excludePrivate": {
+          "type": "boolean",
+          "description": "Drop RFC1918 and reserved addresses before rendering. Useful for egress hunts, wrong for internal host hunts."
+        },
+        "body": { "type": "string", "minLength": 1, "maxLength": 20000 },
+        "open": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Optional URL template that opens the rendered query in the console. Never followed automatically: the analyst has to click, and the destination host must be approved once per pack."
+        },
+        "maxItems": { "type": "integer", "minimum": 1, "description": "Overrides the dialect chunk size for this template." },
+        "reference": { "type": "string", "format": "uri" },
+        "mitre": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^T\\d{4}(\\.\\d{3})?$" },
+          "description": "ATT&CK technique ids covered by the template."
+        }
+      }
+    }
+  }
+}

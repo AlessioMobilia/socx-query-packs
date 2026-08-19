@@ -1,0 +1,133 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "splunk-ioc",
+  "kind": "ioc",
+  "name": "Splunk — IOC hunting",
+  "description": "SPL searches built on Common Information Model field names, so they work on any sourcetype that is CIM compliant. Adjust the index variable to your environment before running.",
+  "vendor": "Splunk",
+  "dialect": "spl",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["splunkcloud.com", "splunk.com"],
+    "note": "Add your on-premise search head as a custom target in SOCx settings."
+  },
+  "variables": [
+    { "id": "index", "label": "Index", "default": "*", "description": "Narrow this down: index=* on a large deployment is slow and expensive." },
+    { "id": "range", "label": "Time range", "default": "7d", "options": ["24h", "7d", "30d"] }
+  ],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10,
+      "children": [
+        { "id": "traffic", "label": "Traffic" },
+        { "id": "web", "label": "Web and proxy" },
+        { "id": "dns", "label": "DNS" }
+      ] },
+    { "id": "endpoint", "label": "Endpoint", "order": 20 },
+    { "id": "identity", "label": "Identity", "order": 30 },
+    { "id": "accelerated", "label": "Accelerated (tstats)", "order": 40 }
+  ],
+  "templates": [
+    {
+      "id": "network-traffic",
+      "name": "Network traffic towards the indicators",
+      "group": "network/traffic",
+      "description": "CIM Network Traffic fields. Matches the indicator as destination or source.",
+      "byType": {
+        "IP": { "field": "dest_ip", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n  (dest_ip {{op}} ({{iocs}}) OR src_ip {{op}} ({{iocs}}))\n| stats count AS events, min(_time) AS first_seen, max(_time) AS last_seen,\n        values(dest_port) AS ports, values(action) AS actions\n        BY src_ip, dest_ip, sourcetype\n| convert ctime(first_seen) ctime(last_seen)\n| sort - events"
+    },
+    {
+      "id": "web-proxy",
+      "name": "Proxy requests to the indicators",
+      "group": "network/web",
+      "description": "CIM Web data model fields, covering both the host header and the full URL.",
+      "byType": {
+        "Domain": { "field": "url", "op": "IN" },
+        "URL": { "field": "url", "op": "IN" },
+        "IP": { "field": "dest_ip", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| search {{field}} {{op}} ({{iocs}})\n| table _time, src, user, {{field}}, http_method, status, bytes_out, http_user_agent\n| sort - _time"
+    },
+    {
+      "id": "web-proxy-substring",
+      "name": "Proxy requests containing the domains",
+      "group": "network/web",
+      "description": "Substring variant for when the logged URL carries a path and the exact match above returns nothing.",
+      "byType": {
+        "Domain": { "field": "url", "op": "IN" },
+        "URL": { "field": "url", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| regex url=\"{{iocs|regex}}\"\n| table _time, src, user, url, http_method, status, bytes_out, http_user_agent\n| sort - _time"
+    },
+    {
+      "id": "dns-queries",
+      "name": "DNS resolutions of the domains",
+      "group": "network/dns",
+      "description": "CIM Network Resolution. Shows which client asked for the domain and what it got back.",
+      "byType": {
+        "Domain": { "field": "query", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| search {{field}} {{op}} ({{iocs}})\n| stats count AS lookups, values(answer) AS answers, min(_time) AS first_seen, max(_time) AS last_seen\n        BY src, {{field}}\n| convert ctime(first_seen) ctime(last_seen)\n| sort - lookups"
+    },
+    {
+      "id": "file-hash",
+      "name": "Endpoint events matching the hashes",
+      "group": "endpoint",
+      "description": "CIM Endpoint fields. Sysmon, Defender and most EDR forwarders normalise into these.",
+      "byType": {
+        "SHA256": { "field": "file_hash", "op": "IN" },
+        "SHA1": { "field": "file_hash", "op": "IN" },
+        "MD5": { "field": "file_hash", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| search {{field}} {{op}} ({{iocs}})\n| table _time, host, user, process_name, process, parent_process_name, file_path, {{field}}\n| sort - _time"
+    },
+    {
+      "id": "command-line",
+      "name": "Indicators appearing in a command line",
+      "group": "endpoint",
+      "description": "Catches downloaders and exfiltration one-liners that carry the address as an argument.",
+      "byType": {
+        "IP": { "field": "process", "op": "IN" },
+        "Domain": { "field": "process", "op": "IN" },
+        "URL": { "field": "process", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| regex process=\"{{iocs|regex}}\"\n| table _time, host, user, parent_process_name, process_name, process\n| sort - _time"
+    },
+    {
+      "id": "authentication-src",
+      "name": "Authentications from the IP addresses",
+      "group": "identity",
+      "description": "CIM Authentication. Splits successes from failures per account, so a successful spray stands out.",
+      "byType": {
+        "IP": { "field": "src", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| search {{field}} {{op}} ({{iocs}})\n| stats count AS attempts,\n        count(eval(action=\"success\")) AS successes,\n        count(eval(action=\"failure\")) AS failures,\n        values(app) AS apps\n        BY user, src\n| where successes > 0\n| sort - successes"
+    },
+    {
+      "id": "tstats-traffic",
+      "name": "Accelerated traffic lookup (tstats)",
+      "group": "accelerated",
+      "description": "Runs against the accelerated Network Traffic data model. Orders of magnitude faster on large estates, but only covers data the model has accelerated.",
+      "byType": {
+        "IP": { "field": "All_Traffic.dest_ip", "op": "IN" }
+      },
+      "body": "| tstats summariesonly=true count, min(_time) AS first_seen, max(_time) AS last_seen\n  FROM datamodel=Network_Traffic.All_Traffic\n  WHERE earliest=-{{var:range}} ({{field}} {{op}} ({{iocs}}))\n  BY All_Traffic.src_ip, All_Traffic.dest_ip, All_Traffic.dest_port\n| rename All_Traffic.* AS *\n| convert ctime(first_seen) ctime(last_seen)\n| sort - count"
+    },
+    {
+      "id": "raw-sweep",
+      "name": "Raw sweep across every sourcetype",
+      "group": "accelerated",
+      "description": "Full text search when you do not know which sourcetype carries the field. Keep the time range short.",
+      "byType": {
+        "IP": { "field": "_raw", "op": "IN" },
+        "Domain": { "field": "_raw", "op": "IN" },
+        "URL": { "field": "_raw", "op": "IN" },
+        "SHA256": { "field": "_raw", "op": "IN" },
+        "Email": { "field": "_raw", "op": "IN" }
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}}\n| regex _raw=\"{{iocs|regex}}\"\n| stats count BY index, sourcetype, host\n| sort - count"
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "multi-platform-standard",
+  "kind": "standard",
+  "name": "Chronicle, CrowdStrike, Cortex, Elastic — hunting playbook",
+  "description": "The same handful of high value hunts expressed on the remaining platforms. Each template declares its own dialect, so one pack serves several consoles.",
+  "vendor": "Community",
+  "dialect": "udm",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "variables": [
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d"] }
+  ],
+  "groups": [
+    { "id": "chronicle", "label": "Google SecOps", "order": 10 },
+    { "id": "crowdstrike", "label": "CrowdStrike", "order": 20 },
+    { "id": "cortex", "label": "Cortex XDR", "order": 30 },
+    { "id": "elastic", "label": "Elastic", "order": 40 }
+  ],
+  "templates": [
+    {
+      "id": "chronicle-failed-logins",
+      "name": "Failed logins grouped by source",
+      "group": "chronicle",
+      "dialect": "udm",
+      "description": "Set the window in the console time picker before running.",
+      "requiresIocs": false,
+      "body": "metadata.event_type = \"USER_LOGIN\" AND security_result.action = \"BLOCK\""
+    },
+    {
+      "id": "chronicle-encoded-powershell",
+      "name": "PowerShell with an encoded command",
+      "group": "chronicle",
+      "dialect": "udm",
+      "requiresIocs": false,
+      "body": "metadata.event_type = \"PROCESS_LAUNCH\" AND\ntarget.process.file.full_path = /powershell(\\.exe)?$/ nocase AND\nre.regex(target.process.command_line, `(?i)(-enc|-EncodedCommand|FromBase64String)`)"
+    },
+    {
+      "id": "chronicle-lolbin-download",
+      "name": "Living off the land download",
+      "group": "chronicle",
+      "dialect": "udm",
+      "requiresIocs": false,
+      "body": "metadata.event_type = \"PROCESS_LAUNCH\" AND\nre.regex(target.process.file.full_path, `(?i)(certutil|bitsadmin|mshta|regsvr32|curl)\\.exe$`) AND\nre.regex(target.process.command_line, `(?i)(https?://|ftp://)`)"
+    },
+    {
+      "id": "crowdstrike-encoded-powershell",
+      "name": "PowerShell with an encoded command",
+      "group": "crowdstrike",
+      "dialect": "logscale",
+      "requiresIocs": false,
+      "body": "#event_simpleName = ProcessRollup2\n| FileName = /powershell(\\.exe)?$/i\n| CommandLine = /(-enc|-EncodedCommand|FromBase64String)/i\n| table([@timestamp, ComputerName, UserName, CommandLine, ParentBaseFileName])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "crowdstrike-office-child",
+      "name": "Office applications spawning a shell",
+      "group": "crowdstrike",
+      "dialect": "logscale",
+      "requiresIocs": false,
+      "body": "#event_simpleName = ProcessRollup2\n| ParentBaseFileName = /^(winword|excel|powerpnt|outlook)\\.exe$/i\n| FileName = /^(powershell|pwsh|cmd|wscript|cscript|mshta|rundll32|regsvr32)\\.exe$/i\n| table([@timestamp, ComputerName, UserName, ParentBaseFileName, FileName, CommandLine])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "crowdstrike-run-keys",
+      "name": "Autorun registry keys modified",
+      "group": "crowdstrike",
+      "dialect": "logscale",
+      "requiresIocs": false,
+      "body": "#event_simpleName = /^(AsepValueUpdate|RegSystemConfigValueUpdate)$/\n| RegObjectName = /CurrentVersion\\\\Run/i\n| table([@timestamp, ComputerName, RegObjectName, RegValueName, RegStringValue])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "cortex-encoded-powershell",
+      "name": "PowerShell with an encoded command",
+      "group": "cortex",
+      "dialect": "xql",
+      "requiresIocs": false,
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.PROCESS\n  and action_process_image_name ~= \"(?i)powershell(\\.exe)?\"\n  and action_process_image_command_line ~= \"(?i)(-enc|-EncodedCommand|FromBase64String)\"\n| fields _time, agent_hostname, actor_effective_username, action_process_image_command_line\n| sort desc _time"
+    },
+    {
+      "id": "cortex-office-child",
+      "name": "Office applications spawning a shell",
+      "group": "cortex",
+      "dialect": "xql",
+      "requiresIocs": false,
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.PROCESS\n  and actor_process_image_name in (\"winword.exe\", \"excel.exe\", \"powerpnt.exe\", \"outlook.exe\")\n  and action_process_image_name in (\"powershell.exe\", \"cmd.exe\", \"wscript.exe\", \"cscript.exe\", \"mshta.exe\", \"rundll32.exe\")\n| fields _time, agent_hostname, actor_process_image_name, action_process_image_name, action_process_image_command_line\n| sort desc _time"
+    },
+    {
+      "id": "elastic-failed-auth",
+      "name": "Failed authentications grouped by source",
+      "group": "elastic",
+      "dialect": "esql",
+      "requiresIocs": false,
+      "body": "FROM logs-*\n| WHERE @timestamp > NOW() - 24 hours\n| WHERE event.category == \"authentication\" AND event.outcome == \"failure\"\n| STATS failures = COUNT(*), accounts = COUNT_DISTINCT(user.name) BY source.ip\n| WHERE failures > 10\n| SORT failures DESC"
+    },
+    {
+      "id": "elastic-encoded-powershell",
+      "name": "PowerShell with an encoded command",
+      "group": "elastic",
+      "dialect": "esql",
+      "requiresIocs": false,
+      "body": "FROM logs-*\n| WHERE @timestamp > NOW() - 24 hours\n| WHERE process.name == \"powershell.exe\"\n| WHERE process.command_line RLIKE \"(?i).*(-enc|-encodedcommand|frombase64string).*\"\n| KEEP @timestamp, host.name, user.name, process.parent.name, process.command_line\n| SORT @timestamp DESC"
+    },
+    {
+      "id": "elastic-rare-parent-child",
+      "name": "Rare parent and child process pairs",
+      "group": "elastic",
+      "dialect": "esql",
+      "description": "Frequency analysis over process ancestry: the rare pairs are where the interesting things hide.",
+      "requiresIocs": false,
+      "body": "FROM logs-*\n| WHERE @timestamp > NOW() - 7 days\n| WHERE event.category == \"process\" AND event.type == \"start\"\n| STATS executions = COUNT(*), hosts = COUNT_DISTINCT(host.name)\n        BY process.parent.name, process.name\n| WHERE executions < 10\n| SORT executions ASC"
+    }
+  ]
+}

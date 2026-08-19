@@ -1,0 +1,100 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "crowdstrike-logscale-ioc",
+  "kind": "ioc",
+  "name": "CrowdStrike Falcon LogScale / NG-SIEM — IOC hunting",
+  "description": "LogScale queries over Falcon telemetry events. Event names follow the #event_simpleName convention used by the Falcon Data Replicator and NG-SIEM.",
+  "vendor": "CrowdStrike",
+  "dialect": "logscale",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["falcon.crowdstrike.com", "falcon.us-2.crowdstrike.com", "falcon.eu-1.crowdstrike.com", "falcon.laggar.gcw.crowdstrike.com", "cloud.humio.com"]
+  },
+  "variables": [],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10,
+      "children": [
+        { "id": "connections", "label": "Connections" },
+        { "id": "dns", "label": "DNS" }
+      ] },
+    { "id": "files", "label": "Files and processes", "order": 20 },
+    { "id": "triage", "label": "Triage summaries", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "network-connect",
+      "name": "Outbound connections to the IP addresses",
+      "group": "network/connections",
+      "description": "IPv4 connect events. Add NetworkConnectIP6 if the estate carries IPv6 telemetry.",
+      "byType": {
+        "IP": { "field": "RemoteAddressIP4", "op": "in" }
+      },
+      "body": "#event_simpleName = NetworkConnectIP4\n| in(field=\"{{field}}\", values=[{{iocs}}])\n| table([@timestamp, ComputerName, UserName, FileName, RemoteAddressIP4, RemotePort, ContextProcessId])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "network-connect-summary",
+      "name": "Connections summarised per host",
+      "group": "triage",
+      "description": "One row per host and destination, with first and last sighting — the shape you want when scoping.",
+      "byType": {
+        "IP": { "field": "RemoteAddressIP4", "op": "in" }
+      },
+      "body": "#event_simpleName = NetworkConnectIP4\n| in(field=\"{{field}}\", values=[{{iocs}}])\n| groupBy([ComputerName, RemoteAddressIP4],\n          function=[count(as=Hits), min(@timestamp, as=FirstSeen), max(@timestamp, as=LastSeen),\n                    collect([FileName], limit=10)])\n| sort(Hits, order=desc)"
+    },
+    {
+      "id": "dns-request",
+      "name": "DNS requests for the domains",
+      "group": "network/dns",
+      "description": "Falcon DnsRequest events, including the resolved addresses.",
+      "byType": {
+        "Domain": { "field": "DomainName", "op": "in" }
+      },
+      "body": "#event_simpleName = DnsRequest\n| in(field=\"{{field}}\", values=[{{iocs}}], ignoreCase=true)\n| table([@timestamp, ComputerName, UserName, DomainName, IP4Records, ContextBaseFileName])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "dns-request-regex",
+      "name": "DNS requests matching the domains (regex)",
+      "group": "network/dns",
+      "description": "Regex variant that also catches subdomains of the indicators.",
+      "byType": {
+        "Domain": { "field": "DomainName", "op": "=~" }
+      },
+      "body": "#event_simpleName = DnsRequest\n| DomainName = /{{iocs|regex}}/i\n| table([@timestamp, ComputerName, UserName, DomainName, IP4Records])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "process-hash",
+      "name": "Processes matching the hashes",
+      "group": "files",
+      "description": "Execution telemetry. Falcon records SHA256 and MD5 on ProcessRollup2.",
+      "byType": {
+        "SHA256": { "field": "SHA256HashData", "op": "in" },
+        "MD5": { "field": "MD5HashData", "op": "in" }
+      },
+      "body": "#event_simpleName = ProcessRollup2\n| in(field=\"{{field}}\", values=[{{iocs}}], ignoreCase=true)\n| table([@timestamp, ComputerName, UserName, FileName, FilePath, CommandLine, {{field}}])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "file-written",
+      "name": "Files written matching the hashes",
+      "group": "files",
+      "description": "Catches a payload dropped on disk even if it never executed.",
+      "byType": {
+        "SHA256": { "field": "SHA256HashData", "op": "in" },
+        "MD5": { "field": "MD5HashData", "op": "in" }
+      },
+      "body": "#event_simpleName = /^(NewExecutableWritten|PeFileWritten|NewScriptWritten)$/\n| in(field=\"{{field}}\", values=[{{iocs}}], ignoreCase=true)\n| table([@timestamp, ComputerName, TargetFileName, {{field}}, ContextBaseFileName])\n| sort(@timestamp, order=desc)"
+    },
+    {
+      "id": "command-line",
+      "name": "Indicators in a command line",
+      "group": "files",
+      "description": "Finds the indicator passed as an argument, which is how living-off-the-land downloads appear.",
+      "byType": {
+        "IP": { "field": "CommandLine", "op": "=~" },
+        "Domain": { "field": "CommandLine", "op": "=~" },
+        "URL": { "field": "CommandLine", "op": "=~" }
+      },
+      "body": "#event_simpleName = ProcessRollup2\n| CommandLine = /{{iocs|regex}}/i\n| table([@timestamp, ComputerName, UserName, FileName, CommandLine, ParentBaseFileName])\n| sort(@timestamp, order=desc)"
+    }
+  ]
+}

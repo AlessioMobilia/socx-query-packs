@@ -1,0 +1,311 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "defender-xdr-ioc",
+  "kind": "ioc",
+  "name": "Microsoft Defender XDR — IOC hunting",
+  "description": "Advanced hunting queries that look for a list of indicators across Defender for Endpoint, Defender for Office 365 and Defender for Identity tables.",
+  "vendor": "Microsoft",
+  "dialect": "kql",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": [
+      "security.microsoft.com",
+      "securitycenter.windows.com"
+    ]
+  },
+  "variables": [
+    {
+      "id": "range",
+      "label": "Time range",
+      "default": "7d",
+      "options": [
+        "24h",
+        "7d",
+        "30d"
+      ],
+      "description": "Passed to ago(). Advanced hunting keeps 30 days of data."
+    }
+  ],
+  "groups": [
+    {
+      "id": "network",
+      "label": "Network",
+      "order": 10,
+      "children": [
+        {
+          "id": "egress",
+          "label": "Egress and C2"
+        }
+      ]
+    },
+    {
+      "id": "files",
+      "label": "Files",
+      "order": 20,
+      "children": [
+        {
+          "id": "presence",
+          "label": "Presence"
+        },
+        {
+          "id": "execution",
+          "label": "Execution"
+        }
+      ]
+    },
+    {
+      "id": "email",
+      "label": "Email",
+      "order": 30,
+      "children": [
+        {
+          "id": "delivery",
+          "label": "Delivery"
+        },
+        {
+          "id": "clicks",
+          "label": "Clicks"
+        }
+      ]
+    },
+    {
+      "id": "identity",
+      "label": "Identity",
+      "order": 40
+    },
+    {
+      "id": "endpoint",
+      "label": "Endpoint",
+      "order": 50,
+      "children": [
+        {
+          "id": "persistence",
+          "label": "Persistence"
+        },
+        {
+          "id": "process",
+          "label": "Process"
+        }
+      ]
+    }
+  ],
+  "templates": [
+    {
+      "id": "network-contact",
+      "name": "Network connections to the indicators",
+      "group": "network/egress",
+      "description": "Devices that opened a connection towards the indicators, with the process that initiated it.",
+      "byType": {
+        "IP": {
+          "field": "RemoteIP",
+          "op": "in~"
+        },
+        "Domain": {
+          "field": "RemoteUrl",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "RemoteUrl",
+          "op": "has_any"
+        }
+      },
+      "body": "DeviceNetworkEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, ActionType, RemoteIP, RemotePort, RemoteUrl,\n          InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "network-contact-summary",
+      "name": "Network connections — one line per device",
+      "group": "network/egress",
+      "description": "Same as above collapsed to a triage table: which device, how many times, first and last seen.",
+      "byType": {
+        "IP": {
+          "field": "RemoteIP",
+          "op": "in~"
+        },
+        "Domain": {
+          "field": "RemoteUrl",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "RemoteUrl",
+          "op": "has_any"
+        }
+      },
+      "body": "DeviceNetworkEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| summarize Hits = count(), FirstSeen = min(Timestamp), LastSeen = max(Timestamp),\n            Processes = make_set(InitiatingProcessFileName, 10)\n          by DeviceName, {{field}}\n| sort by Hits desc"
+    },
+    {
+      "id": "file-hash",
+      "name": "File hashes seen on endpoints",
+      "group": "files/presence",
+      "description": "File, process and image load events matching the hashes. Covers dropped files as well as execution.",
+      "byType": {
+        "SHA256": {
+          "field": "SHA256",
+          "op": "in~"
+        },
+        "SHA1": {
+          "field": "SHA1",
+          "op": "in~"
+        },
+        "MD5": {
+          "field": "MD5",
+          "op": "in~"
+        }
+      },
+      "body": "union DeviceFileEvents, DeviceProcessEvents, DeviceImageLoadEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, ActionType, FileName, FolderPath, {{field}},\n          InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName\n| sort by Timestamp desc"
+    },
+    {
+      "id": "file-hash-execution",
+      "name": "Executions of the hashes",
+      "group": "files/execution",
+      "description": "Restricted to process creation, to separate an executed sample from one that was only written to disk.",
+      "byType": {
+        "SHA256": {
+          "field": "SHA256",
+          "op": "in~"
+        },
+        "SHA1": {
+          "field": "SHA1",
+          "op": "in~"
+        },
+        "MD5": {
+          "field": "MD5",
+          "op": "in~"
+        }
+      },
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, AccountName, FileName, FolderPath, ProcessCommandLine,\n          InitiatingProcessFileName, InitiatingProcessCommandLine, {{field}}\n| sort by Timestamp desc"
+    },
+    {
+      "id": "email-sender",
+      "name": "Messages received from the senders",
+      "group": "email/delivery",
+      "description": "Defender for Office 365 delivery outcome for messages coming from the indicators.",
+      "byType": {
+        "Email": {
+          "field": "SenderFromAddress",
+          "op": "in~"
+        },
+        "Domain": {
+          "field": "SenderFromDomain",
+          "op": "in~"
+        }
+      },
+      "body": "EmailEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, NetworkMessageId, SenderFromAddress, SenderMailFromAddress, SenderIPv4,\n          RecipientEmailAddress, Subject, DeliveryAction, DeliveryLocation, ThreatTypes, AuthenticationDetails\n| sort by Timestamp desc"
+    },
+    {
+      "id": "email-urls",
+      "name": "Messages containing the URLs",
+      "group": "email/delivery",
+      "description": "Joins EmailUrlInfo with EmailEvents so you get sender, recipient and delivery action for every message carrying the URL.",
+      "byType": {
+        "URL": {
+          "field": "Url",
+          "op": "has_any"
+        },
+        "Domain": {
+          "field": "Url",
+          "op": "has_any"
+        }
+      },
+      "body": "EmailUrlInfo\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| join kind=inner (\n    EmailEvents\n    | where Timestamp > ago({{var:range}})\n    | project NetworkMessageId, SenderFromAddress, RecipientEmailAddress, Subject, DeliveryAction, DeliveryLocation\n) on NetworkMessageId\n| project Timestamp, SenderFromAddress, RecipientEmailAddress, Subject, Url, DeliveryAction, DeliveryLocation\n| sort by Timestamp desc"
+    },
+    {
+      "id": "email-attachments",
+      "name": "Attachments matching the hashes",
+      "group": "email/delivery",
+      "description": "Which messages delivered a file with one of the hashes, and to whom.",
+      "byType": {
+        "SHA256": {
+          "field": "SHA256",
+          "op": "in~"
+        }
+      },
+      "body": "EmailAttachmentInfo\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| join kind=inner (\n    EmailEvents\n    | where Timestamp > ago({{var:range}})\n    | project NetworkMessageId, SenderFromAddress, RecipientEmailAddress, Subject, DeliveryAction\n) on NetworkMessageId\n| project Timestamp, SenderFromAddress, RecipientEmailAddress, Subject, FileName, FileType, SHA256, DeliveryAction\n| sort by Timestamp desc"
+    },
+    {
+      "id": "url-clicks",
+      "name": "Safe Links clicks on the URLs",
+      "group": "email/clicks",
+      "description": "Who actually clicked, and whether the click went through the block page.",
+      "byType": {
+        "URL": {
+          "field": "Url",
+          "op": "has_any"
+        },
+        "Domain": {
+          "field": "Url",
+          "op": "has_any"
+        }
+      },
+      "body": "UrlClickEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, AccountUpn, Url, ActionType, IsClickedThrough, ThreatTypes, NetworkMessageId\n| sort by Timestamp desc"
+    },
+    {
+      "id": "identity-logon-ip",
+      "name": "Authentications from the IP addresses",
+      "group": "identity",
+      "description": "On-premises and hybrid logon activity sourced from the indicators.",
+      "byType": {
+        "IP": {
+          "field": "IPAddress",
+          "op": "in~"
+        }
+      },
+      "body": "IdentityLogonEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, AccountUpn, AccountDisplayName, DeviceName, LogonType, Application, Protocol, IPAddress, ActionType, FailureReason\n| sort by Timestamp desc"
+    },
+    {
+      "id": "device-logon-ip",
+      "name": "Device logons from the IP addresses",
+      "group": "identity",
+      "description": "Remote logons onto endpoints originating from the indicators — the query to run for a suspected lateral movement source.",
+      "byType": {
+        "IP": {
+          "field": "RemoteIP",
+          "op": "in~"
+        }
+      },
+      "body": "DeviceLogonEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, AccountDomain, AccountName, LogonType, ActionType, RemoteIP, RemoteDeviceName, IsLocalAdmin\n| sort by Timestamp desc"
+    },
+    {
+      "id": "registry-value",
+      "name": "Indicators written into the registry",
+      "group": "endpoint/persistence",
+      "description": "Catches C2 addresses and payload URLs stored in registry values by a loader.",
+      "byType": {
+        "IP": {
+          "field": "RegistryValueData",
+          "op": "has_any"
+        },
+        "Domain": {
+          "field": "RegistryValueData",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "RegistryValueData",
+          "op": "has_any"
+        }
+      },
+      "body": "DeviceRegistryEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, ActionType, RegistryKey, RegistryValueName, RegistryValueData,\n          InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "command-line-mention",
+      "name": "Indicators appearing in a command line",
+      "group": "endpoint/process",
+      "description": "Slower but broad: finds indicators passed as arguments to any process, which is how downloaders and exfiltration scripts show up.",
+      "byType": {
+        "IP": {
+          "field": "ProcessCommandLine",
+          "op": "has_any"
+        },
+        "Domain": {
+          "field": "ProcessCommandLine",
+          "op": "has_any"
+        },
+        "URL": {
+          "field": "ProcessCommandLine",
+          "op": "has_any"
+        }
+      },
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where {{field}} {{op}} ({{iocs}})\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine,\n          InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    }
+  ]
+}

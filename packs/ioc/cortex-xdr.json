@@ -1,0 +1,79 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "cortex-xdr-ioc",
+  "kind": "ioc",
+  "name": "Palo Alto Cortex XDR / XSIAM — IOC hunting",
+  "description": "XQL queries over the xdr_data dataset. The time range is selected in the query editor, so it never appears in the query text.",
+  "vendor": "Palo Alto Networks",
+  "dialect": "xql",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["xdr.paloaltonetworks.com", "paloaltonetworks.com"],
+    "pathHint": "(?i)(xql|query-builder|xdr)"
+  },
+  "variables": [],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10,
+      "children": [{ "id": "flows", "label": "Flows" }, { "id": "dns", "label": "DNS" }] },
+    { "id": "files", "label": "Files and processes", "order": 20 },
+    { "id": "triage", "label": "Triage summaries", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "network-remote-ip",
+      "name": "Connections to the IP addresses",
+      "group": "network/flows",
+      "description": "Story and endpoint network events pointing at the indicators.",
+      "byType": { "IP": { "field": "action_remote_ip", "op": "in" } },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.NETWORK and {{field}} {{op}} ({{iocs}})\n| fields _time, agent_hostname, actor_effective_username, actor_process_image_name,\n         action_local_ip, action_remote_ip, action_remote_port\n| sort desc _time"
+    },
+    {
+      "id": "network-summary",
+      "name": "Connections summarised per host",
+      "group": "triage",
+      "description": "Scoping view: which endpoints talked to the indicators and how often.",
+      "byType": { "IP": { "field": "action_remote_ip", "op": "in" } },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.NETWORK and {{field}} {{op}} ({{iocs}})\n| comp count() as hits, min(_time) as first_seen, max(_time) as last_seen\n       by agent_hostname, action_remote_ip\n| sort desc hits"
+    },
+    {
+      "id": "dns-query",
+      "name": "DNS queries for the domains",
+      "group": "network/dns",
+      "description": "Endpoint DNS telemetry, which resolves before the proxy sees the request.",
+      "byType": { "Domain": { "field": "dns_query_name", "op": "in" } },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.NETWORK and {{field}} {{op}} ({{iocs}})\n| fields _time, agent_hostname, actor_process_image_name, dns_query_name, action_remote_ip\n| sort desc _time"
+    },
+    {
+      "id": "file-hash",
+      "name": "Processes matching the hashes",
+      "group": "files",
+      "description": "Process execution keyed on the image hash.",
+      "byType": {
+        "SHA256": { "field": "action_process_image_sha256", "op": "in" },
+        "MD5": { "field": "action_process_image_md5", "op": "in" }
+      },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.PROCESS and {{field}} {{op}} ({{iocs}})\n| fields _time, agent_hostname, actor_effective_username, action_process_image_name,\n         action_process_image_command_line, {{field}}\n| sort desc _time"
+    },
+    {
+      "id": "file-write-hash",
+      "name": "Files written matching the hashes",
+      "group": "files",
+      "description": "Dropped payloads that may never have executed.",
+      "byType": { "SHA256": { "field": "action_file_sha256", "op": "in" } },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.FILE and {{field}} {{op}} ({{iocs}})\n| fields _time, agent_hostname, action_file_path, action_file_name, {{field}}, actor_process_image_name\n| sort desc _time"
+    },
+    {
+      "id": "command-line",
+      "name": "Indicators in a command line",
+      "group": "files",
+      "description": "Regex match against the full command line of every process.",
+      "byType": {
+        "IP": { "field": "action_process_image_command_line", "op": "~=" },
+        "Domain": { "field": "action_process_image_command_line", "op": "~=" },
+        "URL": { "field": "action_process_image_command_line", "op": "~=" }
+      },
+      "body": "dataset = xdr_data\n| filter event_type = ENUM.PROCESS and {{field}} ~= \"{{iocs|regex}}\"\n| fields _time, agent_hostname, actor_process_image_name, action_process_image_command_line\n| sort desc _time"
+    }
+  ]
+}

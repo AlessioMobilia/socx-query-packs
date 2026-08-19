@@ -1,0 +1,127 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "sentinel-standard",
+  "kind": "standard",
+  "name": "Microsoft Sentinel — hunting playbook",
+  "description": "Identity and cloud focused hunts over a Sentinel workspace: Entra ID sign-ins, audit events, Office activity and Azure resource changes.",
+  "vendor": "Microsoft",
+  "dialect": "kql",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["portal.azure.com"],
+    "pathHint": "(?i)(sentinel|SecurityInsights)"
+  },
+  "variables": [
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] }
+  ],
+  "groups": [
+    { "id": "identity", "label": "Identity", "order": 10,
+      "children": [
+        { "id": "bruteforce", "label": "Brute force and spray" },
+        { "id": "anomaly", "label": "Anomalies" },
+        { "id": "privilege", "label": "Privilege" }
+      ] },
+    { "id": "email", "label": "Email and collaboration", "order": 20 },
+    { "id": "cloud", "label": "Cloud resources", "order": 30 },
+    { "id": "hygiene", "label": "Hygiene", "order": 40 }
+  ],
+  "templates": [
+    {
+      "id": "failed-signins-by-ip",
+      "name": "Failed sign-ins grouped by source IP",
+      "group": "identity/bruteforce",
+      "description": "Starting point for any password attack triage.",
+      "requiresIocs": false,
+      "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where ResultType != \"0\"\n| summarize Failures = count(), Accounts = dcount(UserPrincipalName),\n            Targets = make_set(UserPrincipalName, 25),\n            Reasons = make_set(ResultDescription, 5),\n            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\n          by IPAddress, Country = tostring(LocationDetails.countryOrRegion)\n| where Failures > 10\n| sort by Accounts desc, Failures desc"
+    },
+    {
+      "id": "password-spray",
+      "name": "Password spray — many accounts, few attempts each",
+      "group": "identity/bruteforce",
+      "description": "Spraying looks different from brute force: a wide account fan-out with a low per-account count.",
+      "requiresIocs": false,
+      "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where ResultType in (\"50126\", \"50053\", \"50055\", \"50056\")\n| summarize Attempts = count(), Accounts = dcount(UserPrincipalName) by IPAddress, bin(TimeGenerated, 1h)\n| where Accounts >= 10 and Attempts / Accounts <= 5\n| sort by Accounts desc"
+    },
+    {
+      "id": "spray-success",
+      "name": "Successful sign-in from a spraying source",
+      "group": "identity/bruteforce",
+      "description": "Joins the failures with the successes so you immediately see which account fell.",
+      "requiresIocs": false,
+      "body": "let sprayers = SigninLogs\n    | where TimeGenerated > ago({{var:range}})\n    | where ResultType != \"0\"\n    | summarize Failures = count(), Accounts = dcount(UserPrincipalName) by IPAddress\n    | where Failures >= 20 and Accounts >= 5\n    | project IPAddress;\nSigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where ResultType == \"0\"\n| where IPAddress in (sprayers)\n| project TimeGenerated, UserPrincipalName, IPAddress, AppDisplayName,\n          Country = tostring(LocationDetails.countryOrRegion), UserAgent, ConditionalAccessStatus\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "multi-country-signin",
+      "name": "Accounts signing in from several countries",
+      "group": "identity/anomaly",
+      "description": "Cheap impossible-travel proxy that needs no ML: same account, several countries in the window.",
+      "requiresIocs": false,
+      "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where ResultType == \"0\"\n| extend Country = tostring(LocationDetails.countryOrRegion)\n| summarize Countries = dcount(Country), CountryList = make_set(Country, 10),\n            IPs = make_set(IPAddress, 10), Logons = count()\n          by UserPrincipalName\n| where Countries > 1\n| sort by Countries desc"
+    },
+    {
+      "id": "legacy-auth",
+      "name": "Successful sign-ins over legacy authentication",
+      "group": "identity/anomaly",
+      "description": "Legacy protocols bypass conditional access and MFA; a success here is worth a look.",
+      "requiresIocs": false,
+      "body": "SigninLogs\n| where TimeGenerated > ago({{var:range}})\n| where ResultType == \"0\"\n| where ClientAppUsed in (\"Other clients\", \"IMAP4\", \"POP3\", \"SMTP\", \"Exchange ActiveSync\", \"Authenticated SMTP\")\n| summarize Logons = count(), IPs = make_set(IPAddress, 10), Apps = make_set(ClientAppUsed, 5)\n          by UserPrincipalName\n| sort by Logons desc"
+    },
+    {
+      "id": "privileged-role-assigned",
+      "name": "Privileged roles assigned",
+      "group": "identity/privilege",
+      "description": "Directory role changes, which is how an attacker makes access durable.",
+      "requiresIocs": false,
+      "body": "AuditLogs\n| where TimeGenerated > ago({{var:range}})\n| where OperationName has_any (\"Add member to role\", \"Add eligible member to role\")\n| extend Actor = tostring(InitiatedBy.user.userPrincipalName),\n         Target = tostring(TargetResources[0].userPrincipalName),\n         Role = tostring(TargetResources[0].modifiedProperties[1].newValue)\n| project TimeGenerated, OperationName, Actor, Target, Role, Result\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "oauth-consent",
+      "name": "OAuth application consent granted",
+      "group": "identity/privilege",
+      "description": "Illicit consent grants survive a password reset, so they are worth reviewing individually.",
+      "requiresIocs": false,
+      "body": "AuditLogs\n| where TimeGenerated > ago({{var:range}})\n| where OperationName has_any (\"Consent to application\", \"Add delegated permission grant\", \"Add app role assignment\")\n| extend Actor = tostring(InitiatedBy.user.userPrincipalName),\n         App = tostring(TargetResources[0].displayName),\n         Permissions = tostring(TargetResources[0].modifiedProperties)\n| project TimeGenerated, OperationName, Actor, App, Permissions, Result\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "inbox-forwarding",
+      "name": "Inbox forwarding or redirect rules created",
+      "group": "email",
+      "description": "The single most reliable business email compromise signal.",
+      "requiresIocs": false,
+      "body": "OfficeActivity\n| where TimeGenerated > ago({{var:range}})\n| where Operation in~ (\"New-InboxRule\", \"Set-InboxRule\", \"UpdateInboxRules\", \"Set-Mailbox\")\n| where tostring(Parameters) has_any (\"ForwardTo\", \"RedirectTo\", \"ForwardAsAttachmentTo\", \"ForwardingSmtpAddress\", \"DeleteMessage\")\n| project TimeGenerated, UserId, Operation, ClientIP, Parameters\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "mailbox-permission-change",
+      "name": "Mailbox delegation granted",
+      "group": "email",
+      "description": "Full access or send-as granted to another account, a quiet way to keep reading someone's mail.",
+      "requiresIocs": false,
+      "body": "OfficeActivity\n| where TimeGenerated > ago({{var:range}})\n| where Operation in~ (\"Add-MailboxPermission\", \"Add-RecipientPermission\", \"AddFolderPermissions\")\n| project TimeGenerated, UserId, Operation, ClientIP, OfficeObjectId, Parameters\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "azure-nsg-change",
+      "name": "Network security group rules changed",
+      "group": "cloud",
+      "description": "Firewall openings in the cloud subscription, including who made them.",
+      "requiresIocs": false,
+      "body": "AzureActivity\n| where TimeGenerated > ago({{var:range}})\n| where OperationNameValue has_any (\"NETWORKSECURITYGROUPS/SECURITYRULES/WRITE\", \"NETWORKSECURITYGROUPS/WRITE\", \"NETWORKSECURITYGROUPS/SECURITYRULES/DELETE\")\n| project TimeGenerated, Caller, CallerIpAddress, OperationNameValue, ResourceGroup, Resource, ActivityStatusValue\n| sort by TimeGenerated desc"
+    },
+    {
+      "id": "azure-key-access",
+      "name": "Key Vault secrets read",
+      "group": "cloud",
+      "description": "Secret retrieval by an unusual principal is a strong post-compromise signal.",
+      "requiresIocs": false,
+      "body": "AzureDiagnostics\n| where TimeGenerated > ago({{var:range}})\n| where ResourceType == \"VAULTS\" and OperationName in (\"SecretGet\", \"KeyGet\", \"CertificateGet\")\n| summarize Reads = count(), Secrets = dcount(id_s), FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)\n          by identity_claim_upn_s, CallerIPAddress, Resource\n| sort by Reads desc"
+    },
+    {
+      "id": "ingestion-gaps",
+      "name": "Log sources that stopped reporting",
+      "group": "hygiene",
+      "description": "A blind spot is not a hunt result, but it is the reason a hunt found nothing.",
+      "requiresIocs": false,
+      "body": "union withsource = TableName *\n| where TimeGenerated > ago(7d)\n| summarize LastEvent = max(TimeGenerated), Events = count() by TableName\n| extend HoursSilent = datetime_diff(\"hour\", now(), LastEvent)\n| where HoursSilent > 6\n| sort by HoursSilent desc"
+    }
+  ]
+}

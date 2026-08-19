@@ -1,0 +1,98 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "trend-vision-one-ioc",
+  "kind": "ioc",
+  "name": "Trend Vision One — IOC hunting",
+  "description": "Search App queries for Trend Vision One. Field names depend on the selected data source: pick Endpoint Activity Data before running the endpoint templates and Network Activity Data for the network ones.",
+  "vendor": "Trend Micro",
+  "dialect": "trend-v1",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "verified": false,
+  "match": {
+    "hostnames": ["portal.xdr.trendmicro.com", "xdr.trendmicro.com"]
+  },
+  "variables": [],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10 },
+    { "id": "endpoint", "label": "Endpoint", "order": 20,
+      "children": [{ "id": "files", "label": "Files" }, { "id": "process", "label": "Process" }] },
+    { "id": "email", "label": "Email", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "dest-ip",
+      "name": "Connections to the IP addresses",
+      "group": "network",
+      "description": "Endpoint Activity Data. Matches the remote address of the connection.",
+      "byType": { "IP": { "field": "dst", "op": ":" } },
+      "body": "{{field}}{{op}}({{iocs}})"
+    },
+    {
+      "id": "any-ip",
+      "name": "Connections in either direction",
+      "group": "network",
+      "description": "Adds the source side, for inbound activity.",
+      "byType": { "IP": { "field": "dst", "op": ":" } },
+      "body": "dst:({{iocs}}) OR src:({{iocs}})"
+    },
+    {
+      "id": "request-url",
+      "name": "Requests to the URLs or domains",
+      "group": "network",
+      "description": "The request field carries the full URL observed by the agent.",
+      "byType": {
+        "URL": { "field": "request", "op": ":" },
+        "Domain": { "field": "request", "op": ":" }
+      },
+      "body": "{{field}}{{op}}({{iocs}})"
+    },
+    {
+      "id": "file-hash",
+      "name": "Files matching the hashes",
+      "group": "endpoint/files",
+      "description": "Object file hash on Endpoint Activity Data.",
+      "byType": {
+        "SHA256": { "field": "objectFileHashSha256", "op": ":" },
+        "SHA1": { "field": "objectFileHashSha1", "op": ":" },
+        "MD5": { "field": "objectFileHashMd5", "op": ":" }
+      },
+      "body": "{{field}}{{op}}({{iocs}})"
+    },
+    {
+      "id": "process-hash",
+      "name": "Processes matching the hashes",
+      "group": "endpoint/process",
+      "description": "Hash of the process image rather than of a written file.",
+      "byType": {
+        "SHA256": { "field": "processFileHashSha256", "op": ":" },
+        "SHA1": { "field": "processFileHashSha1", "op": ":" },
+        "MD5": { "field": "processFileHashMd5", "op": ":" }
+      },
+      "body": "{{field}}{{op}}({{iocs}})"
+    },
+    {
+      "id": "command-line",
+      "name": "Indicators inside a command line",
+      "group": "endpoint/process",
+      "description": "Catches downloaders that pass the address as an argument.",
+      "byType": {
+        "IP": { "field": "processCmd", "op": ":" },
+        "Domain": { "field": "processCmd", "op": ":" },
+        "URL": { "field": "processCmd", "op": ":" }
+      },
+      "body": "{{field}}{{op}}({{iocs}})"
+    },
+    {
+      "id": "mail-sender",
+      "name": "Messages from the senders",
+      "group": "email",
+      "description": "Requires the Email Activity Data source.",
+      "byType": {
+        "Email": { "field": "mailFromAddresses", "op": ":" },
+        "Domain": { "field": "mailFromAddresses", "op": ":" }
+      },
+      "body": "{{field}}{{op}}({{iocs}})"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "elastic-ioc",
+  "kind": "ioc",
+  "name": "Elastic Security — IOC hunting",
+  "description": "ES|QL queries over ECS normalised indices. Field names follow the Elastic Common Schema, so they hold for Elastic Agent, Beats and most community integrations.",
+  "vendor": "Elastic",
+  "dialect": "esql",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["kb.elastic-cloud.com", "found.io", "elastic-cloud.com"],
+    "note": "Self managed Kibana runs on internal hostnames; add yours as a custom target."
+  },
+  "variables": [
+    { "id": "index", "label": "Index pattern", "default": "logs-*", "options": ["logs-*", "filebeat-*", "winlogbeat-*", "*"] },
+    { "id": "range", "label": "Time range", "default": "7 days", "options": ["24 hours", "7 days", "30 days"] }
+  ],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10,
+      "children": [{ "id": "flows", "label": "Flows" }, { "id": "dns", "label": "DNS" }, { "id": "http", "label": "HTTP" }] },
+    { "id": "endpoint", "label": "Endpoint", "order": 20 },
+    { "id": "identity", "label": "Identity", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "network-flows",
+      "name": "Flows involving the IP addresses",
+      "group": "network/flows",
+      "description": "Matches the indicator as source or destination, then collapses to one row per pair.",
+      "byType": { "IP": { "field": "destination.ip", "op": "IN" } },
+      "body": "FROM {{var:index}}\n| WHERE @timestamp > NOW() - {{var:range}}\n| WHERE destination.ip {{op}} ({{iocs}}) OR source.ip {{op}} ({{iocs}})\n| STATS events = COUNT(*), first_seen = MIN(@timestamp), last_seen = MAX(@timestamp)\n        BY source.ip, destination.ip, destination.port, event.dataset\n| SORT events DESC"
+    },
+    {
+      "id": "dns-question",
+      "name": "DNS questions for the domains",
+      "group": "network/dns",
+      "description": "Which host resolved the indicators, with the answer returned.",
+      "byType": { "Domain": { "field": "dns.question.name", "op": "IN" } },
+      "body": "FROM {{var:index}}\n| WHERE @timestamp > NOW() - {{var:range}}\n| WHERE {{field}} {{op}} ({{iocs}})\n| KEEP @timestamp, host.name, source.ip, dns.question.name, dns.answers.data, dns.response_code\n| SORT @timestamp DESC"
+    },
+    {
+      "id": "http-url",
+      "name": "HTTP requests to the URLs or domains",
+      "group": "network/http",
+      "description": "Proxy and web logs, matching either the full URL or the domain part.",
+      "byType": {
+        "URL": { "field": "url.full", "op": "IN" },
+        "Domain": { "field": "url.domain", "op": "IN" }
+      },
+      "body": "FROM {{var:index}}\n| WHERE @timestamp > NOW() - {{var:range}}\n| WHERE {{field}} {{op}} ({{iocs}})\n| KEEP @timestamp, source.ip, user.name, url.full, http.request.method, http.response.status_code, user_agent.original\n| SORT @timestamp DESC"
+    },
+    {
+      "id": "file-hash",
+      "name": "Files and processes matching the hashes",
+      "group": "endpoint",
+      "description": "ECS records the hash on both file and process documents; this covers both.",
+      "byType": {
+        "SHA256": { "field": "file.hash.sha256", "op": "IN" },
+        "SHA1": { "field": "file.hash.sha1", "op": "IN" },
+        "MD5": { "field": "file.hash.md5", "op": "IN" }
+      },
+      "body": "FROM {{var:index}}\n| WHERE @timestamp > NOW() - {{var:range}}\n| WHERE {{field}} {{op}} ({{iocs}}) OR process.hash.sha256 {{op}} ({{iocs}})\n| KEEP @timestamp, host.name, user.name, event.action, file.path, process.name, process.command_line\n| SORT @timestamp DESC"
+    },
+    {
+      "id": "authentication",
+      "name": "Authentications from the IP addresses",
+      "group": "identity",
+      "description": "Splits successes from failures per account so a successful spray is obvious.",
+      "byType": { "IP": { "field": "source.ip", "op": "IN" } },
+      "body": "FROM {{var:index}}\n| WHERE @timestamp > NOW() - {{var:range}}\n| WHERE {{field}} {{op}} ({{iocs}}) AND event.category == \"authentication\"\n| STATS attempts = COUNT(*),\n        successes = COUNT(CASE(event.outcome == \"success\", 1, NULL)),\n        failures = COUNT(CASE(event.outcome == \"failure\", 1, NULL))\n        BY user.name, source.ip\n| WHERE successes > 0\n| SORT successes DESC"
+    },
+    {
+      "id": "lucene-quick",
+      "name": "Quick Lucene filter (Discover bar)",
+      "group": "network/flows",
+      "description": "Paste straight into the Discover query bar when you just want to eyeball the raw documents.",
+      "dialect": "lucene",
+      "byType": {
+        "IP": { "field": "destination.ip", "op": ":" },
+        "Domain": { "field": "url.domain", "op": ":" },
+        "URL": { "field": "url.full", "op": ":" },
+        "SHA256": { "field": "file.hash.sha256", "op": ":" }
+      },
+      "body": "{{field}}:({{iocs}})"
+    }
+  ]
+}

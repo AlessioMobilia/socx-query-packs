@@ -1,0 +1,129 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "chronicle-ioc",
+  "kind": "ioc",
+  "name": "Google SecOps (Chronicle) — IOC hunting",
+  "description": "UDM Search statements over the normalised Unified Data Model. Because UDM has no IN operator, every list is expanded into an OR chain — keep batches small.",
+  "vendor": "Google",
+  "dialect": "udm",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["backstory.chronicle.security", "chronicle.security"],
+    "note": "Google SecOps tenants are served on customer specific subdomains; add yours as a custom target."
+  },
+  "variables": [],
+  "groups": [
+    { "id": "network", "label": "Network", "order": 10,
+      "children": [
+        { "id": "flows", "label": "Flows" },
+        { "id": "dns", "label": "DNS" },
+        { "id": "http", "label": "HTTP" }
+      ] },
+    { "id": "files", "label": "Files", "order": 20 },
+    { "id": "identity", "label": "Identity", "order": 30 },
+    { "id": "email", "label": "Email", "order": 40 }
+  ],
+  "templates": [
+    {
+      "id": "network-ip",
+      "name": "Connections involving the IP addresses",
+      "group": "network/flows",
+      "description": "Matches the indicator as either endpoint of the flow. The time window comes from the console picker.",
+      "byType": {
+        "IP": { "field": "target.ip", "op": "=" }
+      },
+      "body": "(target.ip = {{iocs|or-values}}) OR (principal.ip = {{iocs|or-values}})"
+    },
+    {
+      "id": "network-ip-regex",
+      "name": "Connections involving the IP addresses (regex)",
+      "group": "network/flows",
+      "description": "Single regex instead of a long OR chain. Use this when the list is large enough to hit the query size limit.",
+      "byType": {
+        "IP": { "field": "target.ip", "op": "re.regex" }
+      },
+      "body": "re.regex(target.ip, `{{iocs|regex}}`) OR re.regex(principal.ip, `{{iocs|regex}}`)"
+    },
+    {
+      "id": "dns-question",
+      "name": "DNS questions for the domains",
+      "group": "network/dns",
+      "description": "Which asset resolved the domain, from any DNS log source Chronicle parses.",
+      "byType": {
+        "Domain": { "field": "network.dns.questions.name", "op": "=" }
+      },
+      "body": "metadata.event_type = \"NETWORK_DNS\" AND network.dns.questions.name = {{iocs|or-values}} nocase"
+    },
+    {
+      "id": "http-host",
+      "name": "HTTP requests to the domains or URLs",
+      "group": "network/http",
+      "description": "Proxy and web gateway events. Covers both the hostname and the full URL field.",
+      "byType": {
+        "Domain": { "field": "target.hostname", "op": "=" },
+        "URL": { "field": "target.url", "op": "=" }
+      },
+      "body": "metadata.event_type = \"NETWORK_HTTP\" AND ({{field}} = {{iocs|or-values}} nocase OR target.url = {{iocs|or-values}} nocase)"
+    },
+    {
+      "id": "file-hash",
+      "name": "Files matching the hashes",
+      "group": "files",
+      "description": "Looks at the target file of any event type, which covers both creation and execution.",
+      "byType": {
+        "SHA256": { "field": "target.file.sha256", "op": "=" },
+        "SHA1": { "field": "target.file.sha1", "op": "=" },
+        "MD5": { "field": "target.file.md5", "op": "=" }
+      },
+      "body": "{{field}} = {{iocs|or-values}} nocase"
+    },
+    {
+      "id": "process-hash",
+      "name": "Process launches matching the hashes",
+      "group": "files",
+      "description": "Restricted to execution, so you can tell a dropped file from a run one.",
+      "byType": {
+        "SHA256": { "field": "target.process.file.sha256", "op": "=" },
+        "SHA1": { "field": "target.process.file.sha1", "op": "=" },
+        "MD5": { "field": "target.process.file.md5", "op": "=" }
+      },
+      "body": "metadata.event_type = \"PROCESS_LAUNCH\" AND {{field}} = {{iocs|or-values}} nocase"
+    },
+    {
+      "id": "login-from-ip",
+      "name": "Logins sourced from the IP addresses",
+      "group": "identity",
+      "description": "Every authentication event, successful or not, coming from the indicators.",
+      "byType": {
+        "IP": { "field": "principal.ip", "op": "=" }
+      },
+      "body": "metadata.event_type = \"USER_LOGIN\" AND principal.ip = {{iocs|or-values}}"
+    },
+    {
+      "id": "email-sender",
+      "name": "Messages from the senders",
+      "group": "email",
+      "description": "Requires an email security log source mapped to the UDM email fields.",
+      "byType": {
+        "Email": { "field": "network.email.from", "op": "=" },
+        "Domain": { "field": "network.email.from", "op": "=" }
+      },
+      "body": "metadata.event_type = \"EMAIL_TRANSACTION\" AND network.email.from = {{iocs|or-values}} nocase"
+    },
+    {
+      "id": "any-field",
+      "name": "Any UDM field mentions the indicators",
+      "group": "network/flows",
+      "description": "Broad sweep when you do not know which log source will carry the indicator. Slower, but Chronicle handles it well over short windows.",
+      "byType": {
+        "IP": { "field": "*", "op": "=" },
+        "Domain": { "field": "*", "op": "=" },
+        "URL": { "field": "*", "op": "=" },
+        "SHA256": { "field": "*", "op": "=" },
+        "Email": { "field": "*", "op": "=" }
+      },
+      "body": "{{iocs|or-terms}}"
+    }
+  ]
+}

@@ -1,0 +1,161 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "defender-xdr-standard",
+  "kind": "standard",
+  "name": "Microsoft Defender XDR — hunting playbook",
+  "description": "Recurring hunting queries that need no indicator. Every template is parameterised on a time range so it can be widened during an investigation.",
+  "vendor": "Microsoft",
+  "dialect": "kql",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["security.microsoft.com", "securitycenter.windows.com"]
+  },
+  "variables": [
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] },
+    { "id": "device", "label": "Device name filter", "default": "", "description": "Leave empty for the whole estate, or type a device name to scope the hunt." }
+  ],
+  "groups": [
+    { "id": "execution", "label": "Execution", "order": 10,
+      "children": [
+        { "id": "office", "label": "Office and documents" },
+        { "id": "scripting", "label": "Scripting" },
+        { "id": "lolbin", "label": "Living off the land" }
+      ] },
+    { "id": "persistence", "label": "Persistence", "order": 20 },
+    { "id": "credentials", "label": "Credential access", "order": 30 },
+    { "id": "identity", "label": "Identity", "order": 40 },
+    { "id": "exfiltration", "label": "Collection and exfiltration", "order": 50 },
+    { "id": "hygiene", "label": "Hygiene", "order": 60 }
+  ],
+  "templates": [
+    {
+      "id": "office-spawns-shell",
+      "name": "Office applications spawning a shell or script host",
+      "group": "execution/office",
+      "description": "The classic maldoc execution chain. Very few legitimate reasons exist for Word or Excel to launch PowerShell.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where InitiatingProcessFileName in~ (\"winword.exe\", \"excel.exe\", \"powerpnt.exe\", \"outlook.exe\", \"msaccess.exe\", \"onenote.exe\")\n| where FileName in~ (\"powershell.exe\", \"pwsh.exe\", \"cmd.exe\", \"wscript.exe\", \"cscript.exe\", \"mshta.exe\", \"rundll32.exe\", \"regsvr32.exe\", \"curl.exe\", \"bitsadmin.exe\")\n| project Timestamp, DeviceName, AccountName, InitiatingProcessFileName, FileName, ProcessCommandLine, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "powershell-encoded",
+      "name": "PowerShell with an encoded command",
+      "group": "execution/scripting",
+      "description": "Encoded commands are legitimate in automation but rare interactively; review the decoded payload for every hit.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FileName in~ (\"powershell.exe\", \"pwsh.exe\")\n| where ProcessCommandLine matches regex @\"(?i)\\s-[eE^]{1,2}[ncodeman]*\\s+[A-Za-z0-9+/=]{20,}\"\n| project Timestamp, DeviceName, AccountName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "powershell-suspicious-args",
+      "name": "PowerShell with download or bypass arguments",
+      "group": "execution/scripting",
+      "description": "Catches the download cradles that do not bother to encode themselves.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FileName in~ (\"powershell.exe\", \"pwsh.exe\")\n| where ProcessCommandLine has_any (\"DownloadString\", \"DownloadFile\", \"Invoke-WebRequest\", \"iwr \", \"Net.WebClient\", \"BypassExecutionPolicy\", \"-ep bypass\", \"-nop\", \"FromBase64String\", \"IEX\", \"Invoke-Expression\")\n| summarize Hits = count(), Commands = make_set(ProcessCommandLine, 5) by DeviceName, AccountName\n| sort by Hits desc"
+    },
+    {
+      "id": "lolbin-download",
+      "name": "Living off the land binaries used to download",
+      "group": "execution/lolbin",
+      "description": "certutil, bitsadmin, curl and friends fetching a remote payload.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FileName in~ (\"certutil.exe\", \"bitsadmin.exe\", \"curl.exe\", \"wget.exe\", \"mshta.exe\", \"regsvr32.exe\", \"rundll32.exe\", \"msiexec.exe\", \"installutil.exe\")\n| where ProcessCommandLine has_any (\"http://\", \"https://\", \"ftp://\", \"\\\\\\\\\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName\n| sort by Timestamp desc"
+    },
+    {
+      "id": "execution-from-temp",
+      "name": "Executables launched from temporary or user folders",
+      "group": "execution/lolbin",
+      "description": "Payloads normally run from Temp, Downloads, AppData or the recycle bin rather than from Program Files.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FolderPath has_any (@\"\\\\AppData\\\\Local\\\\Temp\\\\\", @\"\\\\Downloads\\\\\", @\"\\\\AppData\\\\Roaming\\\\\", @\"\\\\$Recycle.Bin\\\\\", @\"C:\\\\Users\\\\Public\\\\\", @\"\\\\Windows\\\\Temp\\\\\")\n| where FileName endswith \".exe\" or FileName endswith \".scr\" or FileName endswith \".dll\"\n| summarize Executions = count(), Devices = dcount(DeviceName), Hosts = make_set(DeviceName, 10)\n          by FileName, FolderPath, SHA256\n| sort by Executions desc"
+    },
+    {
+      "id": "new-service",
+      "name": "Services installed",
+      "group": "persistence",
+      "description": "New service creation is both a persistence and a lateral movement signal.",
+      "requiresIocs": false,
+      "body": "DeviceEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType == \"ServiceInstalled\"\n| extend ServiceName = tostring(AdditionalFields.ServiceName), ImagePath = tostring(AdditionalFields.ImagePath)\n| project Timestamp, DeviceName, InitiatingProcessAccountName, ServiceName, ImagePath, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "scheduled-task",
+      "name": "Scheduled tasks created",
+      "group": "persistence",
+      "description": "Includes both the schtasks command line and the native task registration event.",
+      "requiresIocs": false,
+      "body": "union\n  (DeviceProcessEvents\n   | where Timestamp > ago({{var:range}})\n   | where FileName =~ \"schtasks.exe\" and ProcessCommandLine has \"/create\"\n   | project Timestamp, DeviceName, AccountName, Detail = ProcessCommandLine),\n  (DeviceEvents\n   | where Timestamp > ago({{var:range}})\n   | where ActionType == \"ScheduledTaskCreated\"\n   | project Timestamp, DeviceName, AccountName = InitiatingProcessAccountName, Detail = tostring(AdditionalFields))\n| sort by Timestamp desc"
+    },
+    {
+      "id": "run-key-persistence",
+      "name": "Autorun registry keys modified",
+      "group": "persistence",
+      "description": "Writes into Run, RunOnce and the Winlogon shell keys.",
+      "requiresIocs": false,
+      "body": "DeviceRegistryEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType in (\"RegistryValueSet\", \"RegistryKeyCreated\")\n| where RegistryKey has_any (@\"\\\\CurrentVersion\\\\Run\", @\"\\\\CurrentVersion\\\\RunOnce\", @\"\\\\Winlogon\", @\"\\\\CurrentVersion\\\\Explorer\\\\Shell Folders\", @\"\\\\Image File Execution Options\")\n| project Timestamp, DeviceName, InitiatingProcessAccountName, RegistryKey, RegistryValueName, RegistryValueData, InitiatingProcessFileName\n| sort by Timestamp desc"
+    },
+    {
+      "id": "lsass-access",
+      "name": "Processes reading LSASS memory",
+      "group": "credentials",
+      "description": "Credential dumping. Expect noise from legitimate security tooling: baseline it once and keep the exclusions in the query.",
+      "requiresIocs": false,
+      "body": "DeviceEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType == \"OpenProcessApiCall\"\n| where FileName =~ \"lsass.exe\"\n| where not (InitiatingProcessFileName in~ (\"MsMpEng.exe\", \"MsSense.exe\", \"csrss.exe\", \"wininit.exe\", \"services.exe\"))\n| project Timestamp, DeviceName, InitiatingProcessAccountName, InitiatingProcessFileName, InitiatingProcessFolderPath, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "shadow-copy-deletion",
+      "name": "Shadow copies deleted or recovery disabled",
+      "group": "credentials",
+      "description": "Late stage ransomware behaviour. Treat every hit as an incident until proven otherwise.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where (FileName =~ \"vssadmin.exe\" and ProcessCommandLine has \"delete\")\n     or (FileName =~ \"wmic.exe\" and ProcessCommandLine has \"shadowcopy\")\n     or (FileName =~ \"bcdedit.exe\" and ProcessCommandLine has_any (\"recoveryenabled\", \"bootstatuspolicy\"))\n     or (FileName =~ \"wbadmin.exe\" and ProcessCommandLine has \"delete\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "failed-logons",
+      "name": "Failed logons per account and source",
+      "group": "identity",
+      "description": "Triage table for brute force and spray activity.",
+      "requiresIocs": false,
+      "body": "DeviceLogonEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType == \"LogonFailed\"\n| summarize Failures = count(), Devices = dcount(DeviceName), Accounts = dcount(AccountName),\n            FirstSeen = min(Timestamp), LastSeen = max(Timestamp)\n          by RemoteIP, AccountName\n| where Failures > 5\n| sort by Failures desc"
+    },
+    {
+      "id": "spray-then-success",
+      "name": "Successful logon after repeated failures",
+      "group": "identity",
+      "description": "The pattern that matters: many failures followed by a success from the same source.",
+      "requiresIocs": false,
+      "body": "DeviceLogonEvents\n| where Timestamp > ago({{var:range}})\n| summarize Failures = countif(ActionType == \"LogonFailed\"),\n            Successes = countif(ActionType == \"LogonSuccess\"),\n            FirstSeen = min(Timestamp), LastSeen = max(Timestamp),\n            Accounts = make_set(AccountName, 20)\n          by RemoteIP\n| where Failures >= 10 and Successes > 0\n| sort by Failures desc"
+    },
+    {
+      "id": "new-local-admin",
+      "name": "Accounts added to a local administrators group",
+      "group": "identity",
+      "description": "Privilege escalation and persistence in one event.",
+      "requiresIocs": false,
+      "body": "DeviceEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType in (\"UserAccountAddedToLocalGroup\", \"UserAccountCreated\")\n| project Timestamp, DeviceName, ActionType, AccountName, AdditionalFields, InitiatingProcessAccountName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "archive-staging",
+      "name": "Archives created by command line tools",
+      "group": "exfiltration",
+      "description": "Data staged before exfiltration usually gets compressed first.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FileName in~ (\"7z.exe\", \"7za.exe\", \"rar.exe\", \"winrar.exe\", \"zip.exe\", \"tar.exe\", \"makecab.exe\")\n     or (FileName in~ (\"powershell.exe\", \"pwsh.exe\") and ProcessCommandLine has \"Compress-Archive\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine\n| sort by Timestamp desc"
+    },
+    {
+      "id": "large-uploads",
+      "name": "Largest outbound transfers per device",
+      "group": "exfiltration",
+      "description": "Ranks external destinations by connection volume, as a cheap proxy for exfiltration.",
+      "requiresIocs": false,
+      "body": "DeviceNetworkEvents\n| where Timestamp > ago({{var:range}})\n| where RemoteIPType == \"Public\" and ActionType == \"ConnectionSuccess\"\n| summarize Connections = count(), Ports = make_set(RemotePort, 10), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)\n          by DeviceName, RemoteIP, RemoteUrl, InitiatingProcessFileName\n| sort by Connections desc\n| take 100"
+    },
+    {
+      "id": "unremediated-detections",
+      "name": "Antivirus detections that were not remediated",
+      "group": "hygiene",
+      "description": "Detections where the action failed or was only partially applied — these silently stay on the estate.",
+      "requiresIocs": false,
+      "body": "DeviceEvents\n| where Timestamp > ago({{var:range}})\n| where ActionType startswith \"AntivirusDetection\"\n| extend ThreatName = tostring(AdditionalFields.ThreatName), WasRemediated = tostring(AdditionalFields.WasRemediated)\n| where WasRemediated != \"true\"\n| project Timestamp, DeviceName, ThreatName, FolderPath, FileName, SHA256, WasRemediated\n| sort by Timestamp desc"
+    }
+  ]
+}

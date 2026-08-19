@@ -1,0 +1,27 @@
+name: Validate query packs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate packs, dialects and index
+        run: node scripts/validate.mjs
+
+      - name: Check every JSON file parses
+        run: |
+          for file in $(find . -name '*.json' -not -path './node_modules/*'); do
+            node -e "JSON.parse(require('fs').readFileSync('$file','utf8'))" \
+              || { echo "invalid JSON: $file"; exit 1; }
+          done
+          echo "all JSON files parse"

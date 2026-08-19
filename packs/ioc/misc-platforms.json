@@ -1,0 +1,222 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "misc-platforms-ioc",
+  "kind": "ioc",
+  "name": "Other platforms — IOC starters",
+  "description": "One working starter query per remaining dialect: SentinelOne, QRadar, CrowdStrike Falcon Event Search, Rapid7 InsightIDR, Sumo Logic, Devo, Securonix, ArcSight, NetWitness, Graylog, osquery-style SQL, grep and PowerShell. Each template declares its own dialect, so a single pack covers them all.",
+  "vendor": "Community",
+  "dialect": "regex",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "variables": [],
+  "groups": [
+    { "id": "edr", "label": "EDR", "order": 10 },
+    { "id": "siem", "label": "SIEM", "order": 20 },
+    { "id": "local", "label": "Local and offline", "order": 30 }
+  ],
+  "templates": [
+    {
+      "id": "sentinelone-network",
+      "name": "SentinelOne — connections to the IP addresses",
+      "group": "edr",
+      "dialect": "s1ql",
+      "description": "Deep Visibility query. Operators are case sensitive.",
+      "byType": { "IP": { "field": "DstIP", "op": "In" } },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "sentinelone-hash",
+      "name": "SentinelOne — files matching the hashes",
+      "group": "edr",
+      "dialect": "s1ql",
+      "description": "Target file hash across all Deep Visibility event types.",
+      "byType": {
+        "SHA256": { "field": "TgtFileSha256", "op": "In" },
+        "SHA1": { "field": "TgtFileSha1", "op": "In" },
+        "MD5": { "field": "TgtFileMd5", "op": "In" }
+      },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "sentinelone-url",
+      "name": "SentinelOne — requests to the domains",
+      "group": "edr",
+      "dialect": "s1ql",
+      "description": "Case insensitive substring match, so subdomains are caught too.",
+      "byType": {
+        "Domain": { "field": "Url", "op": "ContainsCIS" },
+        "URL": { "field": "Url", "op": "ContainsCIS" }
+      },
+      "body": "{{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "crowdstrike-event-search-network",
+      "name": "CrowdStrike Event Search — connections to the IP addresses",
+      "group": "edr",
+      "dialect": "spl",
+      "description": "Legacy Falcon Event Search, which speaks a Splunk derived language.",
+      "byType": { "IP": { "field": "RemoteAddressIP4", "op": "IN" } },
+      "body": "event_simpleName=NetworkConnectIP4 {{field}} {{op}} ({{iocs}})\n| table _time, ComputerName, UserName, FileName, RemoteAddressIP4, RemotePort\n| sort - _time"
+    },
+    {
+      "id": "crowdstrike-event-search-hash",
+      "name": "CrowdStrike Event Search — processes matching the hashes",
+      "group": "edr",
+      "dialect": "spl",
+      "byType": {
+        "SHA256": { "field": "SHA256HashData", "op": "IN" },
+        "MD5": { "field": "MD5HashData", "op": "IN" }
+      },
+      "body": "event_simpleName=ProcessRollup2 {{field}} {{op}} ({{iocs}})\n| table _time, ComputerName, UserName, FileName, CommandLine, {{field}}\n| sort - _time"
+    },
+    {
+      "id": "qradar-ip",
+      "name": "QRadar — events involving the IP addresses",
+      "group": "siem",
+      "dialect": "aql",
+      "description": "Ariel query. The trailing LAST clause is the time filter.",
+      "byType": { "IP": { "field": "sourceip", "op": "IN" } },
+      "body": "SELECT QIDNAME(qid) AS event, LOGSOURCENAME(logsourceid) AS source, sourceip, destinationip, username, starttime\nFROM events\nWHERE sourceip {{op}} ({{iocs}}) OR destinationip {{op}} ({{iocs}})\nORDER BY starttime DESC\nLAST 7 DAYS"
+    },
+    {
+      "id": "qradar-url",
+      "name": "QRadar — payload containing the domains",
+      "group": "siem",
+      "dialect": "aql",
+      "description": "Falls back to a payload search when no normalised URL property exists.",
+      "byType": {
+        "Domain": { "field": "UTF8(payload)", "op": "ILIKE" },
+        "URL": { "field": "UTF8(payload)", "op": "ILIKE" }
+      },
+      "body": "SELECT QIDNAME(qid) AS event, sourceip, destinationip, UTF8(payload) AS raw, starttime\nFROM events\nWHERE {{field}} MATCHES '{{iocs|regex}}'\nORDER BY starttime DESC\nLAST 7 DAYS"
+    },
+    {
+      "id": "insightidr-ip",
+      "name": "Rapid7 InsightIDR — events from the IP addresses",
+      "group": "siem",
+      "dialect": "leql",
+      "byType": { "IP": { "field": "source_ip", "op": "IN" } },
+      "body": "where({{field}} {{op}} [{{iocs}}])"
+    },
+    {
+      "id": "sumo-ip",
+      "name": "Sumo Logic — messages mentioning the IP addresses",
+      "group": "siem",
+      "dialect": "sumo",
+      "byType": {
+        "IP": { "field": "_raw", "op": "matches" },
+        "Domain": { "field": "_raw", "op": "matches" }
+      },
+      "body": "_index=* \n| where _raw matches /{{iocs|regex}}/\n| count by _sourceCategory, _sourceHost\n| sort by _count"
+    },
+    {
+      "id": "devo-ip",
+      "name": "Devo — web activity towards the IP addresses",
+      "group": "siem",
+      "dialect": "devo",
+      "byType": { "IP": { "field": "destinationIp", "op": "in" } },
+      "body": "from siem.logtrust.web.activity\nwhere {{field}} {{op}} ({{iocs}})\nselect eventdate, srcIp, destinationIp, url, statusCode"
+    },
+    {
+      "id": "securonix-ip",
+      "name": "Securonix Spotter — activity involving the IP addresses",
+      "group": "siem",
+      "dialect": "spotter",
+      "byType": { "IP": { "field": "destinationaddress", "op": "IN" } },
+      "body": "index=activity AND {{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "arcsight-ip",
+      "name": "ArcSight — events involving the IP addresses",
+      "group": "siem",
+      "dialect": "ccl",
+      "byType": { "IP": { "field": "destinationAddress", "op": "=" } },
+      "body": "destinationAddress = {{iocs|or-values}} OR sourceAddress = {{iocs|or-values}}"
+    },
+    {
+      "id": "netwitness-ip",
+      "name": "NetWitness — sessions involving the IP addresses",
+      "group": "siem",
+      "dialect": "nwql",
+      "description": "NetWitness takes a bare comma separated meta list, with no brackets.",
+      "byType": { "IP": { "field": "ip.dst", "op": "=" } },
+      "body": "ip.dst = {{iocs}} || ip.src = {{iocs}}"
+    },
+    {
+      "id": "graylog-ip",
+      "name": "Graylog — messages involving the IP addresses",
+      "group": "siem",
+      "dialect": "lucene",
+      "byType": {
+        "IP": { "field": "destination_ip", "op": ":" },
+        "Domain": { "field": "http_host", "op": ":" }
+      },
+      "body": "{{field}}:({{iocs}})"
+    },
+    {
+      "id": "osquery-hash",
+      "name": "osquery / Live Discover — processes matching the hashes",
+      "group": "local",
+      "dialect": "sql",
+      "description": "Works on Sophos Live Discover, Fleet and plain osquery with the hash table joined.",
+      "byType": {
+        "SHA256": { "field": "h.sha256", "op": "IN" },
+        "MD5": { "field": "h.md5", "op": "IN" }
+      },
+      "body": "SELECT p.pid, p.name, p.path, p.cmdline, h.sha256, h.md5\nFROM processes p\nJOIN hash h ON h.path = p.path\nWHERE {{field}} {{op}} ({{iocs}})"
+    },
+    {
+      "id": "grep-logs",
+      "name": "grep — sweep a log directory",
+      "group": "local",
+      "dialect": "regex",
+      "description": "The universal fallback: every indicator is regex escaped and joined into one alternation.",
+      "byType": {
+        "IP": { "field": "", "op": "" },
+        "Domain": { "field": "", "op": "" },
+        "URL": { "field": "", "op": "" },
+        "SHA256": { "field": "", "op": "" },
+        "Email": { "field": "", "op": "" }
+      },
+      "body": "grep -rEin '{{iocs|regex}}' /var/log/"
+    },
+    {
+      "id": "ripgrep-logs",
+      "name": "ripgrep — sweep a directory fast",
+      "group": "local",
+      "dialect": "regex",
+      "byType": {
+        "IP": { "field": "", "op": "" },
+        "Domain": { "field": "", "op": "" },
+        "URL": { "field": "", "op": "" },
+        "SHA256": { "field": "", "op": "" }
+      },
+      "body": "rg -i --no-heading --line-number '{{iocs|regex}}' ."
+    },
+    {
+      "id": "powershell-eventlog",
+      "name": "PowerShell — search the Windows event log",
+      "group": "local",
+      "dialect": "powershell",
+      "description": "Runs on a single host when no EDR telemetry is available.",
+      "byType": {
+        "IP": { "field": "Message", "op": "-match" },
+        "Domain": { "field": "Message", "op": "-match" },
+        "SHA256": { "field": "Message", "op": "-match" }
+      },
+      "body": "Get-WinEvent -FilterHashtable @{ LogName='Security','System','Application'; StartTime=(Get-Date).AddDays(-7) } |\n  Where-Object { $_.Message -match '{{iocs|regex}}' } |\n  Select-Object TimeCreated, Id, LogName, Message |\n  Format-List"
+    },
+    {
+      "id": "powershell-files",
+      "name": "PowerShell — search files on disk",
+      "group": "local",
+      "dialect": "powershell",
+      "byType": {
+        "IP": { "field": "", "op": "" },
+        "Domain": { "field": "", "op": "" },
+        "URL": { "field": "", "op": "" }
+      },
+      "body": "Select-String -Path 'C:\\inetpub\\logs\\*.log' -Pattern '{{iocs|regex}}' |\n  Select-Object Path, LineNumber, Line"
+    }
+  ]
+}

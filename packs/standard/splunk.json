@@ -1,0 +1,115 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "splunk-standard",
+  "kind": "standard",
+  "name": "Splunk — hunting playbook",
+  "description": "Windows and network hunts built on Windows event codes and CIM fields. Set the index variable before running anything on a large deployment.",
+  "vendor": "Splunk",
+  "dialect": "spl",
+  "version": "2026-08-19",
+  "license": "MIT",
+  "match": {
+    "hostnames": ["splunkcloud.com", "splunk.com"]
+  },
+  "variables": [
+    { "id": "index", "label": "Index", "default": "*" },
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] }
+  ],
+  "groups": [
+    { "id": "identity", "label": "Identity", "order": 10 },
+    { "id": "execution", "label": "Execution", "order": 20 },
+    { "id": "persistence", "label": "Persistence", "order": 30 },
+    { "id": "evasion", "label": "Defence evasion", "order": 40 },
+    { "id": "network", "label": "Network", "order": 50 }
+  ],
+  "templates": [
+    {
+      "id": "failed-logons",
+      "name": "Failed logons per account and source",
+      "group": "identity",
+      "description": "Windows event 4625 grouped for triage.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" EventCode=4625 earliest=-{{var:range}}\n| stats count AS failures, dc(Account_Name) AS accounts, values(Failure_Reason) AS reasons,\n        min(_time) AS first_seen, max(_time) AS last_seen\n        BY Source_Network_Address\n| where failures > 10\n| convert ctime(first_seen) ctime(last_seen)\n| sort - failures"
+    },
+    {
+      "id": "spray-then-success",
+      "name": "Successful logon from a source that was failing",
+      "group": "identity",
+      "description": "Correlates 4625 and 4624 on the same source address.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" (EventCode=4625 OR EventCode=4624) earliest=-{{var:range}}\n| stats count(eval(EventCode=4625)) AS failures, count(eval(EventCode=4624)) AS successes,\n        values(Account_Name) AS accounts\n        BY Source_Network_Address\n| where failures >= 20 AND successes > 0\n| sort - failures"
+    },
+    {
+      "id": "account-created",
+      "name": "Accounts created or enabled",
+      "group": "identity",
+      "description": "Events 4720 and 4722, the persistence step after privilege escalation.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" (EventCode=4720 OR EventCode=4722 OR EventCode=4728 OR EventCode=4732) earliest=-{{var:range}}\n| table _time, host, EventCode, Account_Name, Target_Account_Name, Group_Name\n| sort - _time"
+    },
+    {
+      "id": "powershell-encoded",
+      "name": "PowerShell script blocks with encoded payloads",
+      "group": "execution",
+      "description": "Event 4104 script block logging. Requires script block logging to be enabled.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"WinEventLog:Microsoft-Windows-PowerShell/Operational\" EventCode=4104 earliest=-{{var:range}}\n| regex ScriptBlockText=\"(?i)(FromBase64String|-enc\\\\s|-EncodedCommand|DownloadString|IEX|Invoke-Expression|Net\\\\.WebClient)\"\n| table _time, host, user, ScriptBlockText\n| sort - _time"
+    },
+    {
+      "id": "process-creation-lolbin",
+      "name": "Living off the land binaries executed",
+      "group": "execution",
+      "description": "Event 4688 or Sysmon 1, restricted to the usual suspects with a remote argument.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} (EventCode=4688 OR (sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" EventCode=1)) earliest=-{{var:range}}\n| search (New_Process_Name=\"*\\\\certutil.exe\" OR New_Process_Name=\"*\\\\bitsadmin.exe\" OR New_Process_Name=\"*\\\\mshta.exe\" OR New_Process_Name=\"*\\\\regsvr32.exe\" OR New_Process_Name=\"*\\\\rundll32.exe\" OR Image=\"*\\\\certutil.exe\" OR Image=\"*\\\\mshta.exe\")\n| regex CommandLine=\"(?i)(https?://|ftp://|\\\\\\\\\\\\\\\\)\"\n| table _time, host, user, ParentImage, Image, CommandLine\n| sort - _time"
+    },
+    {
+      "id": "new-service",
+      "name": "Services installed",
+      "group": "persistence",
+      "description": "Event 7045 from the System log, a persistence and lateral movement staple.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"WinEventLog:System\" EventCode=7045 earliest=-{{var:range}}\n| table _time, host, Service_Name, Service_File_Name, Service_Type, Service_Start_Type\n| sort - _time"
+    },
+    {
+      "id": "scheduled-task",
+      "name": "Scheduled tasks registered",
+      "group": "persistence",
+      "description": "Event 4698 plus the schtasks command line variant.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} (EventCode=4698 OR (EventCode=4688 New_Process_Name=\"*\\\\schtasks.exe\")) earliest=-{{var:range}}\n| table _time, host, user, Task_Name, New_Process_Name, CommandLine\n| sort - _time"
+    },
+    {
+      "id": "log-cleared",
+      "name": "Event logs cleared",
+      "group": "evasion",
+      "description": "Events 1102 and 104. Rare, loud, and almost always worth an incident.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} (EventCode=1102 OR EventCode=104) earliest=-{{var:range}}\n| table _time, host, user, EventCode, Message\n| sort - _time"
+    },
+    {
+      "id": "defender-disabled",
+      "name": "Endpoint protection disabled or tampered with",
+      "group": "evasion",
+      "description": "Defender configuration changes and exclusions added.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} (sourcetype=\"WinEventLog:Microsoft-Windows-Windows Defender/Operational\" (EventCode=5001 OR EventCode=5007 OR EventCode=5010 OR EventCode=5012)) earliest=-{{var:range}}\n| table _time, host, EventCode, Message\n| sort - _time"
+    },
+    {
+      "id": "rare-user-agents",
+      "name": "Rarest user agents on the proxy",
+      "group": "network",
+      "description": "Frequency analysis: malware rarely bothers to blend into the top of the list.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} earliest=-{{var:range}} http_user_agent=*\n| stats count AS requests, dc(src) AS clients, values(dest) AS destinations BY http_user_agent\n| where requests < 20\n| sort requests"
+    },
+    {
+      "id": "long-connections",
+      "name": "Long lived outbound sessions",
+      "group": "network",
+      "description": "Beaconing and tunnels show up as unusually long or unusually regular sessions.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} earliest=-{{var:range}} duration=*\n| where duration > 3600\n| stats count AS sessions, sum(duration) AS total_seconds, values(dest_port) AS ports BY src_ip, dest_ip\n| sort - total_seconds\n| head 100"
+    }
+  ]
+}
