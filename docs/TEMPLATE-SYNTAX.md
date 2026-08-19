@@ -32,7 +32,8 @@ Filters are appended with `|` and change how a value is rendered.
 | `regex` | regex-escape each value and join into `(a\|b\|c)` | grep, Lucene regex, `matches regex` |
 | `json` | JSON array | API payloads |
 | `newline` | one value per line | lookup files, CSV upload |
-| `or-values` | repeat the value with the dialect's `or` operator | UDM, ArcSight, any language without `IN` |
+| `or-values` | full disjunction built from the binding: `field op "a" OR field op "b"` | UDM, ArcSight, any language without `IN` |
+| `or-values:other.field` | same, against an explicit field, for a second clause | `({{iocs\|or-values}}) OR ({{iocs\|or-values:principal.ip}})` |
 | `or-terms` | bare terms joined with `OR` | full text search operators |
 | `upper` / `lower` | case folding | environments that store hashes uppercase |
 | `urlencode`, `base64`, `gzip_base64url` | encoding, only valid inside `open` | opening the query in a console |
@@ -78,6 +79,16 @@ than silently dropped.
 
 `excludePrivate: true` drops RFC1918 and reserved addresses before rendering.
 Use it for egress hunts; leave it off when you are hunting internal hosts.
+
+A binding may also carry a `suffix`, appended after every comparison when the
+list is expanded. UDM needs it for `nocase`:
+
+```jsonc
+"Domain": { "field": "network.dns.questions.name", "op": "=", "suffix": "nocase" }
+```
+
+renders `name = "a" nocase OR name = "b" nocase`, which is where the modifier
+has to sit — not after the whole chain.
 
 ## Example
 

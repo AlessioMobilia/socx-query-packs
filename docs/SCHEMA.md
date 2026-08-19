@@ -56,12 +56,16 @@ the templates for a console only appear on that console.
 ```jsonc
 "match": {
   "hostnames": ["portal.azure.com"],
-  "pathHint": "(?i)(sentinel|SecurityInsights)"
+  "pathHint": "(sentinel|SecurityInsights)"
 }
 ```
 
 `pathHint` exists because several products share one hostname — Sentinel lives
-inside the Azure portal alongside everything else. Internal consoles are added
+inside the Azure portal alongside everything else. It is matched case
+insensitively against path, query **and hash**, since single page consoles put
+their route after the `#`. Write a plain JavaScript regular expression: a PCRE
+style `(?i)` prefix compiles nowhere in a browser and is rejected by the
+validator. Internal consoles are added
 by the analyst as custom targets in SOCx settings; a pack does not need to know
 about them.
 
@@ -87,7 +91,7 @@ the body.
 | `tags` | — | searched by the palette |
 | `dialect` | — | overrides the pack dialect for this template |
 | `requiresIocs` | — | defaults to `true`; `false` in standard packs |
-| `byType` | when indicators are needed | per type `table`, `field`, `op` |
+| `byType` | when indicators are needed | per type `table`, `field`, `op`, `suffix` |
 | `excludePrivate` | — | drop RFC1918 before rendering |
 | `body` | yes | the query text with placeholders |
 | `open` | — | URL template to open the query in the console |
