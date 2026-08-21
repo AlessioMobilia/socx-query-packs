@@ -6,7 +6,7 @@
   "description": "LogScale queries over Falcon telemetry events. Event names follow the #event_simpleName convention used by the Falcon Data Replicator and NG-SIEM.",
   "vendor": "CrowdStrike",
   "dialect": "logscale",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "match": {
     "hostnames": ["falcon.crowdstrike.com", "falcon.us-2.crowdstrike.com", "falcon.eu-1.crowdstrike.com", "falcon.laggar.gcw.crowdstrike.com", "cloud.humio.com"]
@@ -51,16 +51,6 @@
         "Domain": { "field": "DomainName", "op": "in" }
       },
       "body": "#event_simpleName = DnsRequest\n| in(field=\"{{field}}\", values=[{{iocs}}], ignoreCase=true)\n| table([@timestamp, ComputerName, UserName, DomainName, IP4Records, ContextBaseFileName])\n| sort(@timestamp, order=desc)"
-    },
-    {
-      "id": "dns-request-regex",
-      "name": "DNS requests matching the domains (regex)",
-      "group": "network/dns",
-      "description": "Regex variant that also catches subdomains of the indicators.",
-      "byType": {
-        "Domain": { "field": "DomainName", "op": "=~" }
-      },
-      "body": "#event_simpleName = DnsRequest\n| DomainName = /{{iocs|regex}}/i\n| table([@timestamp, ComputerName, UserName, DomainName, IP4Records])\n| sort(@timestamp, order=desc)"
     },
     {
       "id": "process-hash",

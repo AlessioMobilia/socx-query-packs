@@ -80,6 +80,16 @@ Variables are what make a pack portable between organisations: index names,
 table names, time windows and console hostnames belong here, not hard coded in
 the body.
 
+Use `"type": "checkbox"` for boolean query options. SOCx renders a checkbox and
+substitutes the string `"true"` or `"false"`; the default must use one of those
+two values. A non-empty `options` array still renders a select, while variables
+without either declaration render a text input.
+
+```jsonc
+{ "id": "summariesonly", "label": "Summaries only",
+  "type": "checkbox", "default": "true" }
+```
+
 ## Template
 
 | Field | Required | Notes |

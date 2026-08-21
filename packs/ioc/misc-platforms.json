@@ -3,10 +3,10 @@
   "id": "misc-platforms-ioc",
   "kind": "ioc",
   "name": "Other platforms — IOC starters",
-  "description": "One working starter query per remaining dialect: SentinelOne, QRadar, CrowdStrike Falcon Event Search, Rapid7 InsightIDR, Sumo Logic, Devo, Securonix, ArcSight, NetWitness, Graylog, osquery-style SQL, grep and PowerShell. Each template declares its own dialect, so a single pack covers them all.",
+  "description": "One working starter query per remaining dialect: SentinelOne, QRadar, Rapid7 InsightIDR, Sumo Logic, Devo, Securonix, ArcSight, NetWitness, Graylog, osquery-style SQL, grep and PowerShell. Each template declares its own dialect, so a single pack covers them all.",
   "vendor": "Community",
   "dialect": "regex",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "variables": [],
   "groups": [
@@ -80,37 +80,6 @@
         }
       },
       "body": "{{field}} {{op}} ({{iocs}})"
-    },
-    {
-      "id": "crowdstrike-event-search-network",
-      "name": "CrowdStrike Event Search — connections to the IP addresses",
-      "group": "edr",
-      "dialect": "spl",
-      "description": "Legacy Falcon Event Search, which speaks a Splunk derived language.",
-      "byType": {
-        "IP": {
-          "field": "RemoteAddressIP4",
-          "op": "IN"
-        }
-      },
-      "body": "event_simpleName=NetworkConnectIP4 {{field}} {{op}} ({{iocs}})\n| table _time, ComputerName, UserName, FileName, RemoteAddressIP4, RemotePort\n| sort - _time"
-    },
-    {
-      "id": "crowdstrike-event-search-hash",
-      "name": "CrowdStrike Event Search — processes matching the hashes",
-      "group": "edr",
-      "dialect": "spl",
-      "byType": {
-        "SHA256": {
-          "field": "SHA256HashData",
-          "op": "IN"
-        },
-        "MD5": {
-          "field": "MD5HashData",
-          "op": "IN"
-        }
-      },
-      "body": "event_simpleName=ProcessRollup2 {{field}} {{op}} ({{iocs}})\n| table _time, ComputerName, UserName, FileName, CommandLine, {{field}}\n| sort - _time"
     },
     {
       "id": "qradar-ip",

@@ -6,7 +6,7 @@
   "description": "Recurring hunting queries that need no indicator. Every template is parameterised on a time range so it can be widened during an investigation.",
   "vendor": "Microsoft",
   "dialect": "kql",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "match": {
     "hostnames": ["security.microsoft.com", "securitycenter.windows.com"]
@@ -26,7 +26,8 @@
     { "id": "credentials", "label": "Credential access", "order": 30 },
     { "id": "identity", "label": "Identity", "order": 40 },
     { "id": "exfiltration", "label": "Collection and exfiltration", "order": 50 },
-    { "id": "hygiene", "label": "Hygiene", "order": 60 }
+    { "id": "impact", "label": "Impact and recovery inhibition", "order": 60 },
+    { "id": "hygiene", "label": "Hygiene", "order": 70 }
   ],
   "templates": [
     {
@@ -104,7 +105,7 @@
     {
       "id": "shadow-copy-deletion",
       "name": "Shadow copies deleted or recovery disabled",
-      "group": "credentials",
+      "group": "impact",
       "description": "Late stage ransomware behaviour. Treat every hit as an incident until proven otherwise.",
       "requiresIocs": false,
       "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where (FileName =~ \"vssadmin.exe\" and ProcessCommandLine has \"delete\")\n     or (FileName =~ \"wmic.exe\" and ProcessCommandLine has \"shadowcopy\")\n     or (FileName =~ \"bcdedit.exe\" and ProcessCommandLine has_any (\"recoveryenabled\", \"bootstatuspolicy\"))\n     or (FileName =~ \"wbadmin.exe\" and ProcessCommandLine has \"delete\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine\n| sort by Timestamp desc"
@@ -139,15 +140,23 @@
       "group": "exfiltration",
       "description": "Data staged before exfiltration usually gets compressed first.",
       "requiresIocs": false,
-      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where FileName in~ (\"7z.exe\", \"7za.exe\", \"rar.exe\", \"winrar.exe\", \"zip.exe\", \"tar.exe\", \"makecab.exe\")\n     or (FileName in~ (\"powershell.exe\", \"pwsh.exe\") and ProcessCommandLine has \"Compress-Archive\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine\n| sort by Timestamp desc"
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where isempty(\"{{var:device}}\") or DeviceName =~ \"{{var:device}}\"\n| where FileName in~ (\"7z.exe\", \"7za.exe\", \"rar.exe\", \"winrar.exe\", \"zip.exe\", \"tar.exe\", \"makecab.exe\")\n     or (FileName in~ (\"powershell.exe\", \"pwsh.exe\") and ProcessCommandLine has \"Compress-Archive\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine\n| sort by Timestamp desc"
     },
     {
       "id": "large-uploads",
-      "name": "Largest outbound transfers per device",
+      "name": "High-volume outbound connection destinations",
       "group": "exfiltration",
-      "description": "Ranks external destinations by connection volume, as a cheap proxy for exfiltration.",
+      "description": "Ranks external destinations by successful connection count. DeviceNetworkEvents has no byte count, so this is a triage signal rather than a measure of transferred volume.",
       "requiresIocs": false,
-      "body": "DeviceNetworkEvents\n| where Timestamp > ago({{var:range}})\n| where RemoteIPType == \"Public\" and ActionType == \"ConnectionSuccess\"\n| summarize Connections = count(), Ports = make_set(RemotePort, 10), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)\n          by DeviceName, RemoteIP, RemoteUrl, InitiatingProcessFileName\n| sort by Connections desc\n| take 100"
+      "body": "DeviceNetworkEvents\n| where Timestamp > ago({{var:range}})\n| where isempty(\"{{var:device}}\") or DeviceName =~ \"{{var:device}}\"\n| where RemoteIPType == \"Public\" and ActionType == \"ConnectionSuccess\"\n| summarize Connections = count(), Ports = make_set(RemotePort, 10), FirstSeen = min(Timestamp), LastSeen = max(Timestamp)\n          by DeviceName, RemoteIP, RemoteUrl, InitiatingProcessFileName\n| sort by Connections desc\n| take 100"
+    },
+    {
+      "id": "cloud-sync-exfiltration",
+      "name": "Cloud sync and transfer tools on the command line",
+      "group": "exfiltration",
+      "description": "Specific collection/exfiltration hunt for rclone, AzCopy, WinSCP, MEGAcmd and command-line upload clients.",
+      "requiresIocs": false,
+      "body": "DeviceProcessEvents\n| where Timestamp > ago({{var:range}})\n| where isempty(\"{{var:device}}\") or DeviceName =~ \"{{var:device}}\"\n| where FileName in~ (\"rclone.exe\", \"azcopy.exe\", \"winscp.exe\", \"winscp.com\", \"megacmd.exe\", \"mega-cmd.exe\", \"curl.exe\", \"scp.exe\", \"sftp.exe\")\n| where ProcessCommandLine has_any (\"copy\", \"sync\", \"upload\", \"put \", \"--upload-file\", \"mega.nz\", \"s3:\", \"blob.core.windows.net\")\n| project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine\n| sort by Timestamp desc"
     },
     {
       "id": "unremediated-detections",

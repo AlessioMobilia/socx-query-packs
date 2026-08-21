@@ -6,21 +6,24 @@
   "description": "Windows and network hunts built on Windows event codes and CIM fields. Set the index variable before running anything on a large deployment.",
   "vendor": "Splunk",
   "dialect": "spl",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "match": {
     "hostnames": ["splunkcloud.com", "splunk.com"]
   },
   "variables": [
     { "id": "index", "label": "Index", "default": "*" },
-    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] }
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] },
+    { "id": "summariesonly", "label": "tstats: summaries only", "type": "checkbox", "default": "true" },
+    { "id": "allow-old-summaries", "label": "tstats: allow old summaries", "type": "checkbox", "default": "false" }
   ],
   "groups": [
     { "id": "identity", "label": "Identity", "order": 10 },
-    { "id": "execution", "label": "Execution", "order": 20 },
-    { "id": "persistence", "label": "Persistence", "order": 30 },
-    { "id": "evasion", "label": "Defence evasion", "order": 40 },
-    { "id": "network", "label": "Network", "order": 50 }
+    { "id": "credentials", "label": "Credential access", "order": 20 },
+    { "id": "execution", "label": "Execution", "order": 30 },
+    { "id": "persistence", "label": "Persistence", "order": 40 },
+    { "id": "evasion", "label": "Defence evasion", "order": 50 },
+    { "id": "network", "label": "Network", "order": 60 }
   ],
   "templates": [
     {
@@ -29,7 +32,7 @@
       "group": "identity",
       "description": "Windows event 4625 grouped for triage.",
       "requiresIocs": false,
-      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" EventCode=4625 earliest=-{{var:range}}\n| stats count AS failures, dc(Account_Name) AS accounts, values(Failure_Reason) AS reasons,\n        min(_time) AS first_seen, max(_time) AS last_seen\n        BY Source_Network_Address\n| where failures > 10\n| convert ctime(first_seen) ctime(last_seen)\n| sort - failures"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Security\" EventCode=4625 earliest=-{{var:range}}\n| stats count AS failures, dc(TargetUserName) AS accounts, values(Status) AS statuses, values(SubStatus) AS substatuses,\n        min(_time) AS first_seen, max(_time) AS last_seen\n        BY IpAddress\n| where failures > 10\n| convert ctime(first_seen) ctime(last_seen)\n| sort - failures"
     },
     {
       "id": "spray-then-success",
@@ -37,7 +40,7 @@
       "group": "identity",
       "description": "Correlates 4625 and 4624 on the same source address.",
       "requiresIocs": false,
-      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" (EventCode=4625 OR EventCode=4624) earliest=-{{var:range}}\n| stats count(eval(EventCode=4625)) AS failures, count(eval(EventCode=4624)) AS successes,\n        values(Account_Name) AS accounts\n        BY Source_Network_Address\n| where failures >= 20 AND successes > 0\n| sort - failures"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Security\" (EventCode=4625 OR EventCode=4624) earliest=-{{var:range}}\n| stats count(eval(EventCode=4625)) AS failures, count(eval(EventCode=4624)) AS successes,\n        values(TargetUserName) AS accounts, min(_time) AS first_seen, max(_time) AS last_seen\n        BY IpAddress\n| where failures >= 20 AND successes > 0\n| convert ctime(first_seen) ctime(last_seen)\n| sort - failures"
     },
     {
       "id": "account-created",
@@ -45,7 +48,15 @@
       "group": "identity",
       "description": "Events 4720 and 4722, the persistence step after privilege escalation.",
       "requiresIocs": false,
-      "body": "index={{var:index}} sourcetype=\"WinEventLog:Security\" (EventCode=4720 OR EventCode=4722 OR EventCode=4728 OR EventCode=4732) earliest=-{{var:range}}\n| table _time, host, EventCode, Account_Name, Target_Account_Name, Group_Name\n| sort - _time"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Security\" (EventCode=4720 OR EventCode=4722 OR EventCode=4728 OR EventCode=4732) earliest=-{{var:range}}\n| table _time, host, EventCode, SubjectUserName, TargetUserName, MemberName, GroupName\n| sort - _time"
+    },
+    {
+      "id": "kerberoasting",
+      "name": "Kerberos service tickets using RC4",
+      "group": "credentials",
+      "description": "Event 4769 for non-machine SPNs using RC4 (0x17), a high-value Kerberoasting lead that still needs service-account baselining.",
+      "requiresIocs": false,
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Security\" EventCode=4769 earliest=-{{var:range}}\n  ServiceName!=\"krbtgt\" ServiceName!=\"*$\" TicketEncryptionType=0x17\n| stats count AS tickets, values(IpAddress) AS source_ips, min(_time) AS first_seen, max(_time) AS last_seen\n        BY TargetUserName, ServiceName\n| convert ctime(first_seen) ctime(last_seen)\n| sort - tickets"
     },
     {
       "id": "powershell-encoded",
@@ -53,7 +64,7 @@
       "group": "execution",
       "description": "Event 4104 script block logging. Requires script block logging to be enabled.",
       "requiresIocs": false,
-      "body": "index={{var:index}} sourcetype=\"WinEventLog:Microsoft-Windows-PowerShell/Operational\" EventCode=4104 earliest=-{{var:range}}\n| regex ScriptBlockText=\"(?i)(FromBase64String|-enc\\\\s|-EncodedCommand|DownloadString|IEX|Invoke-Expression|Net\\\\.WebClient)\"\n| table _time, host, user, ScriptBlockText\n| sort - _time"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Microsoft-Windows-PowerShell/Operational\" EventCode=4104 earliest=-{{var:range}}\n| search ScriptBlockText IN (\"*FromBase64String*\", \"*-EncodedCommand*\", \"*DownloadString*\", \"*Invoke-Expression*\", \"*WebClient*\")\n| table _time, host, UserID, ScriptBlockId, ScriptBlockText\n| sort - _time"
     },
     {
       "id": "process-creation-lolbin",
@@ -61,7 +72,15 @@
       "group": "execution",
       "description": "Event 4688 or Sysmon 1, restricted to the usual suspects with a remote argument.",
       "requiresIocs": false,
-      "body": "index={{var:index}} (EventCode=4688 OR (sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" EventCode=1)) earliest=-{{var:range}}\n| search (New_Process_Name=\"*\\\\certutil.exe\" OR New_Process_Name=\"*\\\\bitsadmin.exe\" OR New_Process_Name=\"*\\\\mshta.exe\" OR New_Process_Name=\"*\\\\regsvr32.exe\" OR New_Process_Name=\"*\\\\rundll32.exe\" OR Image=\"*\\\\certutil.exe\" OR Image=\"*\\\\mshta.exe\")\n| regex CommandLine=\"(?i)(https?://|ftp://|\\\\\\\\\\\\\\\\)\"\n| table _time, host, user, ParentImage, Image, CommandLine\n| sort - _time"
+      "body": "index={{var:index}} earliest=-{{var:range}} ((sourcetype=\"XmlWinEventLog:Security\" EventCode=4688) OR (sourcetype=\"XmlWinEventLog:Microsoft-Windows-Sysmon/Operational\" EventCode=1))\n| eval process_path=coalesce(NewProcessName, Image), parent_path=coalesce(ParentProcessName, ParentImage), account=coalesce(SubjectUserName, User)\n| search process_path IN (\"*\\\\certutil.exe\", \"*\\\\bitsadmin.exe\", \"*\\\\mshta.exe\", \"*\\\\regsvr32.exe\", \"*\\\\rundll32.exe\", \"*\\\\msiexec.exe\")\n         CommandLine IN (\"*http://*\", \"*https://*\", \"*ftp://*\", \"*\\\\\\\\*\")\n| table _time, host, account, parent_path, process_path, CommandLine\n| sort - _time"
+    },
+    {
+      "id": "rare-processes-tstats",
+      "name": "Rare process names and hashes (tstats)",
+      "group": "execution",
+      "description": "A prevalence hunt over the Endpoint.Processes data model. Summary-only mode keeps it cheap; disable it when completeness matters more than speed.",
+      "requiresIocs": false,
+      "body": "| tstats summariesonly={{var:summariesonly}} allow_old_summaries={{var:allow-old-summaries}} count AS executions, dc(Processes.dest) AS hosts, values(Processes.parent_process_name) AS parents\n  FROM datamodel=Endpoint.Processes\n  WHERE earliest=-{{var:range}}\n  BY Processes.process_name, Processes.process_hash\n| rename Processes.* AS *\n| where executions < 10 AND hosts < 3\n| sort executions, hosts"
     },
     {
       "id": "new-service",
@@ -69,7 +88,7 @@
       "group": "persistence",
       "description": "Event 7045 from the System log, a persistence and lateral movement staple.",
       "requiresIocs": false,
-      "body": "index={{var:index}} sourcetype=\"WinEventLog:System\" EventCode=7045 earliest=-{{var:range}}\n| table _time, host, Service_Name, Service_File_Name, Service_Type, Service_Start_Type\n| sort - _time"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:System\" EventCode=7045 earliest=-{{var:range}}\n| table _time, host, ServiceName, ImagePath, ServiceType, StartType, AccountName\n| sort - _time"
     },
     {
       "id": "scheduled-task",
@@ -77,7 +96,7 @@
       "group": "persistence",
       "description": "Event 4698 plus the schtasks command line variant.",
       "requiresIocs": false,
-      "body": "index={{var:index}} (EventCode=4698 OR (EventCode=4688 New_Process_Name=\"*\\\\schtasks.exe\")) earliest=-{{var:range}}\n| table _time, host, user, Task_Name, New_Process_Name, CommandLine\n| sort - _time"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Security\" earliest=-{{var:range}} (EventCode=4698 OR (EventCode=4688 NewProcessName=\"*\\\\schtasks.exe\"))\n| table _time, host, SubjectUserName, TaskName, TaskContent, NewProcessName, CommandLine\n| sort - _time"
     },
     {
       "id": "log-cleared",
@@ -85,7 +104,7 @@
       "group": "evasion",
       "description": "Events 1102 and 104. Rare, loud, and almost always worth an incident.",
       "requiresIocs": false,
-      "body": "index={{var:index}} (EventCode=1102 OR EventCode=104) earliest=-{{var:range}}\n| table _time, host, user, EventCode, Message\n| sort - _time"
+      "body": "index={{var:index}} earliest=-{{var:range}} ((sourcetype=\"XmlWinEventLog:Security\" EventCode=1102) OR (sourcetype=\"XmlWinEventLog:System\" EventCode=104))\n| table _time, host, SubjectUserName, Channel, EventCode, Message\n| sort - _time"
     },
     {
       "id": "defender-disabled",
@@ -93,7 +112,7 @@
       "group": "evasion",
       "description": "Defender configuration changes and exclusions added.",
       "requiresIocs": false,
-      "body": "index={{var:index}} (sourcetype=\"WinEventLog:Microsoft-Windows-Windows Defender/Operational\" (EventCode=5001 OR EventCode=5007 OR EventCode=5010 OR EventCode=5012)) earliest=-{{var:range}}\n| table _time, host, EventCode, Message\n| sort - _time"
+      "body": "index={{var:index}} sourcetype=\"XmlWinEventLog:Microsoft-Windows-Windows Defender/Operational\" (EventCode=5001 OR EventCode=5007 OR EventCode=5010 OR EventCode=5012) earliest=-{{var:range}}\n| table _time, host, EventCode, Message\n| sort - _time"
     },
     {
       "id": "rare-user-agents",
