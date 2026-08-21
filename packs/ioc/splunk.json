@@ -6,7 +6,7 @@
   "description": "SPL searches built on Common Information Model field names, so they work on any sourcetype that is CIM compliant. Adjust the index variable to your environment before running.",
   "vendor": "Splunk",
   "dialect": "spl",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "match": {
     "hostnames": ["splunkcloud.com", "splunk.com"],
@@ -14,7 +14,9 @@
   },
   "variables": [
     { "id": "index", "label": "Index", "default": "*", "description": "Narrow this down: index=* on a large deployment is slow and expensive." },
-    { "id": "range", "label": "Time range", "default": "7d", "options": ["24h", "7d", "30d"] }
+    { "id": "range", "label": "Time range", "default": "24h", "options": ["1h", "24h", "7d", "30d"] },
+    { "id": "summariesonly", "label": "tstats: summaries only", "type": "checkbox", "default": "true", "description": "Fast and safe, but excludes data outside the accelerated summary range." },
+    { "id": "allow-old-summaries", "label": "tstats: allow old summaries", "type": "checkbox", "default": "false", "description": "Include summaries created before the current data model definition." }
   ],
   "groups": [
     { "id": "network", "label": "Network", "order": 10,
@@ -25,7 +27,7 @@
       ] },
     { "id": "endpoint", "label": "Endpoint", "order": 20 },
     { "id": "identity", "label": "Identity", "order": 30 },
-    { "id": "accelerated", "label": "Accelerated (tstats)", "order": 40 }
+    { "id": "broad", "label": "Broad fallbacks", "order": 90 }
   ],
   "templates": [
     {
@@ -75,25 +77,25 @@
       "id": "file-hash",
       "name": "Endpoint events matching the hashes",
       "group": "endpoint",
-      "description": "CIM Endpoint fields. Sysmon, Defender and most EDR forwarders normalise into these.",
+      "description": "Searches each hash inline as an indexed term, then coalesces common hash fields for display. This is the reliable generic fallback when no single CIM field is populated consistently.",
       "byType": {
-        "SHA256": { "field": "file_hash", "op": "IN" },
-        "SHA1": { "field": "file_hash", "op": "IN" },
-        "MD5": { "field": "file_hash", "op": "IN" }
+        "SHA256": {},
+        "SHA1": {},
+        "MD5": {}
       },
-      "body": "index={{var:index}} earliest=-{{var:range}}\n| search {{field}} {{op}} ({{iocs}})\n| table _time, host, user, process_name, process, parent_process_name, file_path, {{field}}\n| sort - _time"
+      "body": "index={{var:index}} earliest=-{{var:range}} ({{iocs|or-terms}})\n| eval matched_hash=coalesce(process_hash, file_hash, SHA256, SHA1, MD5, hash)\n| table _time, host, user, process_name, process, parent_process_name, file_path, matched_hash, sourcetype\n| sort - _time"
     },
     {
       "id": "command-line",
       "name": "Indicators appearing in a command line",
       "group": "endpoint",
-      "description": "Catches downloaders and exfiltration one-liners that carry the address as an argument.",
+      "description": "Keyword search restricted to events that expose the CIM process field. This avoids a regex scan while still catching downloaders and exfiltration one-liners.",
       "byType": {
         "IP": { "field": "process", "op": "IN" },
         "Domain": { "field": "process", "op": "IN" },
         "URL": { "field": "process", "op": "IN" }
       },
-      "body": "index={{var:index}} earliest=-{{var:range}}\n| regex process=\"{{iocs|regex}}\"\n| table _time, host, user, parent_process_name, process_name, process\n| sort - _time"
+      "body": "index={{var:index}} earliest=-{{var:range}} process=* ({{iocs|or-terms}})\n| table _time, host, user, parent_process_name, process_name, process, sourcetype\n| sort - _time"
     },
     {
       "id": "authentication-src",
@@ -108,26 +110,40 @@
     {
       "id": "tstats-traffic",
       "name": "Accelerated traffic lookup (tstats)",
-      "group": "accelerated",
-      "description": "Runs against the accelerated Network Traffic data model. Orders of magnitude faster on large estates, but only covers data the model has accelerated.",
+      "group": "network/traffic",
+      "description": "Runs across the indexes represented by the Network Traffic data model. Use the checkboxes to choose summary-only speed versus unsummarized coverage.",
       "byType": {
         "IP": { "field": "All_Traffic.dest_ip", "op": "IN" }
       },
-      "body": "| tstats summariesonly=true count, min(_time) AS first_seen, max(_time) AS last_seen\n  FROM datamodel=Network_Traffic.All_Traffic\n  WHERE earliest=-{{var:range}} ({{field}} {{op}} ({{iocs}}))\n  BY All_Traffic.src_ip, All_Traffic.dest_ip, All_Traffic.dest_port\n| rename All_Traffic.* AS *\n| convert ctime(first_seen) ctime(last_seen)\n| sort - count"
+      "body": "| tstats summariesonly={{var:summariesonly}} allow_old_summaries={{var:allow-old-summaries}} count, min(_time) AS first_seen, max(_time) AS last_seen\n  FROM datamodel=Network_Traffic.All_Traffic\n  WHERE earliest=-{{var:range}} (All_Traffic.dest_ip {{op}} ({{iocs}}) OR All_Traffic.src_ip {{op}} ({{iocs}}))\n  BY All_Traffic.src_ip, All_Traffic.dest_ip, All_Traffic.dest_port\n| rename All_Traffic.* AS *\n| convert ctime(first_seen) ctime(last_seen)\n| sort - count"
     },
     {
-      "id": "raw-sweep",
-      "name": "Raw sweep across every sourcetype",
-      "group": "accelerated",
-      "description": "Full text search when you do not know which sourcetype carries the field. Keep the time range short.",
+      "id": "tstats-process-hash",
+      "name": "Accelerated process hash lookup (tstats)",
+      "group": "endpoint",
+      "description": "Fast, CIM-normalised lookup in Endpoint.Processes. Use the generic endpoint hash query when the data is not mapped or the hash field is not populated.",
       "byType": {
-        "IP": { "field": "_raw", "op": "IN" },
-        "Domain": { "field": "_raw", "op": "IN" },
-        "URL": { "field": "_raw", "op": "IN" },
-        "SHA256": { "field": "_raw", "op": "IN" },
-        "Email": { "field": "_raw", "op": "IN" }
+        "SHA256": { "field": "Processes.process_hash", "op": "IN" },
+        "SHA1": { "field": "Processes.process_hash", "op": "IN" },
+        "MD5": { "field": "Processes.process_hash", "op": "IN" }
       },
-      "body": "index={{var:index}} earliest=-{{var:range}}\n| regex _raw=\"{{iocs|regex}}\"\n| stats count BY index, sourcetype, host\n| sort - count"
+      "body": "| tstats summariesonly={{var:summariesonly}} allow_old_summaries={{var:allow-old-summaries}} count, min(_time) AS first_seen, max(_time) AS last_seen\n  FROM datamodel=Endpoint.Processes\n  WHERE earliest=-{{var:range}} {{field}} {{op}} ({{iocs}})\n  BY Processes.dest, Processes.user, Processes.process_name, Processes.process, Processes.process_hash\n| rename Processes.* AS *\n| convert ctime(first_seen) ctime(last_seen)\n| sort - count"
+    },
+    {
+      "id": "broad-ioc-term-sweep",
+      "name": "Broad IOC term sweep in the selected index",
+      "group": "broad",
+      "description": "Last-resort indexed term search when the source field is unknown. It avoids regex over _raw, but can still be expensive: keep the index and time range narrow.",
+      "byType": {
+        "IP": {},
+        "Domain": {},
+        "URL": {},
+        "SHA256": {},
+        "SHA1": {},
+        "MD5": {},
+        "Email": {}
+      },
+      "body": "index={{var:index}} earliest=-{{var:range}} ({{iocs|or-terms}})\n| stats count, min(_time) AS first_seen, max(_time) AS last_seen BY index, sourcetype, host\n| convert ctime(first_seen) ctime(last_seen)\n| sort - count"
     }
   ]
 }

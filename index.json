@@ -3,7 +3,7 @@
   "name": "SOCx community query packs",
   "description": "Default catalogue shipped with the SOCx browser extension. Every entry points at a self contained pack file; the extension fetches only the ones the analyst enables.",
   "homepage": "https://github.com/AlessioMobilia/socx-query-packs",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "dialects": "dialects/dialects.json",
   "packs": [
@@ -31,7 +31,7 @@
       "name": "Splunk — IOC hunting",
       "dialect": "spl",
       "path": "packs/ioc/splunk.json",
-      "templates": 9,
+      "templates": 10,
       "verified": true
     },
     {
@@ -40,7 +40,7 @@
       "name": "Google SecOps (Chronicle) — IOC hunting",
       "dialect": "udm",
       "path": "packs/ioc/chronicle.json",
-      "templates": 9,
+      "templates": 8,
       "verified": true
     },
     {
@@ -49,7 +49,7 @@
       "name": "CrowdStrike Falcon LogScale / NG-SIEM — IOC hunting",
       "dialect": "logscale",
       "path": "packs/ioc/crowdstrike-logscale.json",
-      "templates": 7,
+      "templates": 6,
       "verified": true
     },
     {
@@ -94,7 +94,7 @@
       "name": "Other platforms — IOC starters",
       "dialect": "multiple",
       "path": "packs/ioc/misc-platforms.json",
-      "templates": 19,
+      "templates": 17,
       "verified": false
     },
     {
@@ -103,7 +103,7 @@
       "name": "Microsoft Defender XDR — hunting playbook",
       "dialect": "kql",
       "path": "packs/standard/defender-xdr.json",
-      "templates": 16,
+      "templates": 17,
       "verified": true
     },
     {
@@ -121,7 +121,7 @@
       "name": "Splunk — hunting playbook",
       "dialect": "spl",
       "path": "packs/standard/splunk.json",
-      "templates": 11,
+      "templates": 13,
       "verified": true
     },
     {

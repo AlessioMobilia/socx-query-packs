@@ -6,7 +6,7 @@
   "description": "UDM Search statements over the normalised Unified Data Model. Because UDM has no IN operator, every list is expanded into an OR chain — keep batches small.",
   "vendor": "Google",
   "dialect": "udm",
-  "version": "2026-08-19",
+  "version": "2026-08-21",
   "license": "MIT",
   "match": {
     "hostnames": ["backstory.chronicle.security", "chronicle.security"],
@@ -34,16 +34,6 @@
         "IP": { "field": "target.ip", "op": "=" }
       },
       "body": "({{iocs|or-values}}) OR ({{iocs|or-values:principal.ip}})"
-    },
-    {
-      "id": "network-ip-regex",
-      "name": "Connections involving the IP addresses (regex)",
-      "group": "network/flows",
-      "description": "Single regex instead of a long OR chain. Use this when the list is large enough to hit the query size limit.",
-      "byType": {
-        "IP": { "field": "target.ip", "op": "re.regex" }
-      },
-      "body": "re.regex(target.ip, `{{iocs|regex}}`) OR re.regex(principal.ip, `{{iocs|regex}}`)"
     },
     {
       "id": "dns-question",

@@ -29,12 +29,11 @@ Everything is data. There is no executable content in a pack, by design.
 
 | Platform | IOC pack | Standard pack | Dialect |
 |---|---|---|---|
-| Microsoft Defender XDR | ✅ 12 | ✅ 16 | `kql` |
+| Microsoft Defender XDR | ✅ 12 | ✅ 17 | `kql` |
 | Microsoft Sentinel | ✅ 9 | ✅ 12 | `kql` |
-| Splunk | ✅ 9 | ✅ 11 | `spl` |
-| Google SecOps (Chronicle) | ✅ 9 | ✅ 3 | `udm` |
-| CrowdStrike Falcon LogScale / NG-SIEM | ✅ 7 | ✅ 3 | `logscale` |
-| CrowdStrike Falcon Event Search | ✅ 2 | — | `spl` |
+| Splunk | ✅ 10 | ✅ 13 | `spl` |
+| Google SecOps (Chronicle) | ✅ 8 | ✅ 3 | `udm` |
+| CrowdStrike Falcon LogScale / NG-SIEM | ✅ 6 | ✅ 3 | `logscale` |
 | Palo Alto Cortex XDR / XSIAM | ✅ 6 | ✅ 2 | `xql` |
 | Elastic Security | ✅ 6 | ✅ 3 | `esql`, `lucene` |
 | IBM QRadar | ✅ 2 | — | `aql` |

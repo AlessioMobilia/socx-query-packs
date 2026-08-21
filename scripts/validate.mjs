@@ -45,6 +45,7 @@ const ESCAPE_STRATEGIES = new Set([
 const LIST_STRATEGIES = new Set([
   "in-operator", "or-expansion", "regex-alternation"
 ])
+const ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 // ---------------------------------------------------------------- dialects
 
@@ -151,6 +152,24 @@ for (const file of packFiles) {
   const groupPaths = collectGroupPaths(pack.groups)
   const variableIds = new Set((pack.variables ?? []).map((variable) => variable.id))
   const templateIds = new Set()
+
+  for (const variable of pack.variables ?? []) {
+    const label = `variable "${variable.id ?? "<missing id>"}"`
+    if (!variable.id || !ID_PATTERN.test(variable.id) || !variable.label) {
+      fail(file, `${label} needs a valid id and label`)
+    }
+    if (variable.type && !["text", "checkbox"].includes(variable.type)) {
+      fail(file, `${label} uses unknown input type "${variable.type}"`)
+    }
+    if (variable.type === "checkbox") {
+      if (variable.default && !["true", "false"].includes(variable.default)) {
+        fail(file, `${label} checkbox default must be "true" or "false"`)
+      }
+      if (variable.options?.length) {
+        fail(file, `${label} checkbox must not declare options`)
+      }
+    }
+  }
 
   for (const template of pack.templates ?? []) {
     const label = `template "${template.id ?? "<missing id>"}"`

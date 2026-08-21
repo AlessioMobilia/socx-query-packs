@@ -80,7 +80,7 @@ Cortex XDR, LogScale, Elastic Discover and Trend all set `timeInQuery: false`.
 | id | Language | Platforms |
 |---|---|---|
 | `kql` | Kusto Query Language | Defender XDR, Sentinel, Azure Data Explorer |
-| `spl` | Search Processing Language | Splunk, CrowdStrike Falcon Event Search |
+| `spl` | Search Processing Language | Splunk Enterprise, Splunk Cloud |
 | `udm` | UDM Search | Google SecOps / Chronicle |
 | `yaral` | YARA-L 2.0 | Google SecOps detection rules (export target) |
 | `logscale` | LogScale Query Language | CrowdStrike Falcon LogScale, NG-SIEM, Humio |
