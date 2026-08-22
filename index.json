@@ -3,7 +3,7 @@
   "name": "SOCx community query packs",
   "description": "Default catalogue shipped with the SOCx browser extension. Every entry points at a self contained pack file; the extension fetches only the ones the analyst enables.",
   "homepage": "https://github.com/AlessioMobilia/socx-query-packs",
-  "version": "2026-08-21",
+  "version": "2026-08-22",
   "license": "MIT",
   "dialects": "dialects/dialects.json",
   "packs": [
