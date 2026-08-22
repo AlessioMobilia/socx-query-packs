@@ -132,6 +132,15 @@
       "path": "packs/standard/multi-platform.json",
       "templates": 11,
       "verified": false
+    },
+    {
+      "id": "log-source-health-standard",
+      "kind": "standard",
+      "name": "Log source health — Splunk and Microsoft Sentinel",
+      "dialect": "multiple",
+      "path": "packs/standard/log-source-health.json",
+      "templates": 10,
+      "verified": false
     }
   ]
 }
