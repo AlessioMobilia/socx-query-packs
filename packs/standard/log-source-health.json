@@ -1,0 +1,253 @@
+{
+  "schema": "socx.querypack/v1",
+  "id": "log-source-health-standard",
+  "kind": "standard",
+  "name": "Log source health — Splunk and Microsoft Sentinel",
+  "description": "Generic operational queries for reviewing log volume and the most recent event seen from indexes, hosts, sources and common Microsoft Sentinel log sources. No fixed silence threshold is applied.",
+  "vendor": "Community",
+  "author": "SOCx Community",
+  "dialect": "spl",
+  "version": "2026-08-22",
+  "license": "MIT",
+  "variables": [
+    {
+      "id": "range",
+      "label": "Lookback window",
+      "default": "7d",
+      "options": [
+        "24h",
+        "7d",
+        "30d",
+        "90d"
+      ],
+      "description": "Search far enough back to include sources that may have stopped reporting."
+    },
+    {
+      "id": "span",
+      "label": "Chart bucket",
+      "default": "1h",
+      "options": [
+        "10m",
+        "30m",
+        "1h",
+        "6h",
+        "1d"
+      ],
+      "description": "Time bucket used by volume charts."
+    },
+    {
+      "id": "index",
+      "label": "Splunk index pattern",
+      "default": "*",
+      "description": "Index name or wildcard, for example main, security_* or *."
+    },
+    {
+      "id": "host",
+      "label": "Splunk host pattern",
+      "default": "*",
+      "description": "Host value or wildcard."
+    },
+    {
+      "id": "source",
+      "label": "Splunk source pattern",
+      "default": "*",
+      "description": "Source value or wildcard."
+    },
+    {
+      "id": "sourcetype",
+      "label": "Splunk sourcetype pattern",
+      "default": "*",
+      "description": "Sourcetype value or wildcard."
+    },
+    {
+      "id": "computer-regex",
+      "label": "Sentinel computer regex",
+      "default": ".*",
+      "description": "Regular expression applied to the Computer field, for example ^srv- or .*."
+    },
+    {
+      "id": "device-regex",
+      "label": "Sentinel CEF device regex",
+      "default": ".*",
+      "description": "Regular expression applied to CommonSecurityLog DeviceName."
+    }
+  ],
+  "groups": [
+    {
+      "id": "splunk-health",
+      "label": "Splunk — log source health",
+      "order": 10
+    },
+    {
+      "id": "sentinel-health",
+      "label": "Microsoft Sentinel — log source health",
+      "order": 20
+    }
+  ],
+  "templates": [
+    {
+      "id": "splunk-index-volume-over-time",
+      "name": "Splunk — event volume over time by index",
+      "group": "splunk-health",
+      "description": "Charts event counts per index using indexed metadata. Useful for spotting ingestion drops without imposing a fixed threshold.",
+      "tags": [
+        "logging",
+        "health",
+        "ingestion",
+        "index",
+        "timechart"
+      ],
+      "requiresIocs": false,
+      "body": "| tstats count AS events WHERE index={{var:index}} earliest=-{{var:range}} BY _time span={{var:span}} index\n| timechart span={{var:span}} sum(events) AS events BY index limit=0 useother=f",
+      "reference": "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.2/search-commands/tstats"
+    },
+    {
+      "id": "splunk-index-last-event",
+      "name": "Splunk — last event received by index",
+      "group": "splunk-health",
+      "description": "Shows the newest indexed event for every matching index, plus the event count in the selected lookback window.",
+      "tags": [
+        "logging",
+        "health",
+        "ingestion",
+        "index"
+      ],
+      "requiresIocs": false,
+      "body": "| tstats count AS events max(_time) AS last_event WHERE index={{var:index}} earliest=-{{var:range}} BY index\n| eval hours_since_last=round((now()-last_event)/3600,2)\n| eval last_event=strftime(last_event,\"%Y-%m-%d %H:%M:%S %z\")\n| table index, last_event, hours_since_last, events\n| sort 0 - hours_since_last",
+      "reference": "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.2/search-commands/tstats"
+    },
+    {
+      "id": "splunk-host-volume-over-time",
+      "name": "Splunk — event volume over time by host",
+      "group": "splunk-health",
+      "description": "Charts event counts for matching hosts inside the selected index pattern.",
+      "tags": [
+        "logging",
+        "health",
+        "host",
+        "timechart"
+      ],
+      "requiresIocs": false,
+      "body": "| tstats count AS events WHERE index={{var:index}} host=\"{{var:host}}\" earliest=-{{var:range}} BY _time span={{var:span}} host\n| timechart span={{var:span}} sum(events) AS events BY host limit=0 useother=f",
+      "reference": "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.2/search-commands/tstats"
+    },
+    {
+      "id": "splunk-host-last-event",
+      "name": "Splunk — last event received by host",
+      "group": "splunk-health",
+      "description": "Lists matching hosts and the timestamp of their newest event in the selected lookback window.",
+      "tags": [
+        "logging",
+        "health",
+        "host"
+      ],
+      "requiresIocs": false,
+      "body": "| tstats count AS events max(_time) AS last_event WHERE index={{var:index}} host=\"{{var:host}}\" earliest=-{{var:range}} BY index host\n| eval hours_since_last=round((now()-last_event)/3600,2)\n| eval last_event=strftime(last_event,\"%Y-%m-%d %H:%M:%S %z\")\n| table index, host, last_event, hours_since_last, events\n| sort 0 - hours_since_last",
+      "reference": "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.2/search-commands/tstats"
+    },
+    {
+      "id": "splunk-source-last-event",
+      "name": "Splunk — last event by host, source and sourcetype",
+      "group": "splunk-health",
+      "description": "Breaks log freshness down to indexed source metadata so a stale input can be isolated beneath a healthy index or host.",
+      "tags": [
+        "logging",
+        "health",
+        "host",
+        "source",
+        "sourcetype"
+      ],
+      "requiresIocs": false,
+      "body": "| tstats count AS events max(_time) AS last_event WHERE index={{var:index}} host=\"{{var:host}}\" source=\"{{var:source}}\" sourcetype=\"{{var:sourcetype}}\" earliest=-{{var:range}} BY index host sourcetype source\n| eval hours_since_last=round((now()-last_event)/3600,2)\n| eval last_event=strftime(last_event,\"%Y-%m-%d %H:%M:%S %z\")\n| table index, host, sourcetype, source, last_event, hours_since_last, events\n| sort 0 - hours_since_last",
+      "reference": "https://help.splunk.com/en/splunk-enterprise/search/spl-search-reference/10.2/search-commands/tstats"
+    },
+    {
+      "id": "sentinel-ingestion-volume-by-table",
+      "name": "Sentinel — ingestion volume over time by table",
+      "group": "sentinel-health",
+      "dialect": "kql",
+      "description": "Charts ingested megabytes per table from the Usage table. This is efficient and avoids scanning every event table.",
+      "tags": [
+        "logging",
+        "health",
+        "ingestion",
+        "sentinel",
+        "table",
+        "timechart"
+      ],
+      "requiresIocs": false,
+      "body": "Usage\n| where TimeGenerated > ago({{var:range}})\n| summarize IngestedMB = sum(Quantity) by bin(TimeGenerated, {{var:span}}), Type\n| extend IngestedMB = round(IngestedMB, 2)\n| sort by TimeGenerated asc\n| render timechart",
+      "reference": "https://learn.microsoft.com/azure/azure-monitor/reference/tables/usage"
+    },
+    {
+      "id": "sentinel-heartbeat-last-by-computer",
+      "name": "Sentinel — last heartbeat received by computer",
+      "group": "sentinel-health",
+      "dialect": "kql",
+      "description": "Shows the latest Heartbeat record for each matching computer. Useful for agent-backed Windows and Linux systems.",
+      "tags": [
+        "logging",
+        "health",
+        "heartbeat",
+        "computer",
+        "sentinel"
+      ],
+      "requiresIocs": false,
+      "body": "Heartbeat\n| where TimeGenerated > ago({{var:range}})\n| where Computer matches regex \"{{var:computer-regex}}\"\n| summarize LastHeartbeat = max(TimeGenerated), Heartbeats = count(), ComputerIP = take_any(ComputerIP), OSType = take_any(OSType), Version = take_any(Version) by Computer\n| extend HoursSinceLast = round(datetime_diff(\"minute\", now(), LastHeartbeat) / 60.0, 2)\n| project Computer, OSType, Version, ComputerIP, LastHeartbeat, HoursSinceLast, Heartbeats\n| sort by HoursSinceLast desc",
+      "reference": "https://learn.microsoft.com/azure/azure-monitor/reference/tables/heartbeat"
+    },
+    {
+      "id": "sentinel-heartbeat-volume-by-computer",
+      "name": "Sentinel — heartbeat volume over time by computer",
+      "group": "sentinel-health",
+      "dialect": "kql",
+      "description": "Charts Heartbeat counts by computer to make collection interruptions visually obvious.",
+      "tags": [
+        "logging",
+        "health",
+        "heartbeat",
+        "computer",
+        "timechart",
+        "sentinel"
+      ],
+      "requiresIocs": false,
+      "body": "Heartbeat\n| where TimeGenerated > ago({{var:range}})\n| where Computer matches regex \"{{var:computer-regex}}\"\n| summarize Heartbeats = count() by bin(TimeGenerated, {{var:span}}), Computer\n| sort by TimeGenerated asc\n| render timechart",
+      "reference": "https://learn.microsoft.com/azure/azure-monitor/reference/tables/heartbeat"
+    },
+    {
+      "id": "sentinel-syslog-last-by-computer",
+      "name": "Sentinel — last Syslog event by computer",
+      "group": "sentinel-health",
+      "dialect": "kql",
+      "description": "Shows the newest Syslog record for each matching computer and host identity.",
+      "tags": [
+        "logging",
+        "health",
+        "syslog",
+        "computer",
+        "sentinel"
+      ],
+      "requiresIocs": false,
+      "body": "Syslog\n| where TimeGenerated > ago({{var:range}})\n| where Computer matches regex \"{{var:computer-regex}}\"\n| summarize LastEvent = max(TimeGenerated), Events = count(), Facilities = make_set(Facility, 10), Severities = make_set(SeverityLevel, 10) by Computer, HostName, HostIP\n| extend HoursSinceLast = round(datetime_diff(\"minute\", now(), LastEvent) / 60.0, 2)\n| project Computer, HostName, HostIP, LastEvent, HoursSinceLast, Events, Facilities, Severities\n| sort by HoursSinceLast desc",
+      "reference": "https://learn.microsoft.com/azure/azure-monitor/reference/tables/syslog"
+    },
+    {
+      "id": "sentinel-cef-last-by-device",
+      "name": "Sentinel — last CEF event by device",
+      "group": "sentinel-health",
+      "dialect": "kql",
+      "description": "Shows the newest CommonSecurityLog event per CEF device, vendor and product.",
+      "tags": [
+        "logging",
+        "health",
+        "cef",
+        "commonsecuritylog",
+        "device",
+        "sentinel"
+      ],
+      "requiresIocs": false,
+      "body": "CommonSecurityLog\n| where TimeGenerated > ago({{var:range}})\n| where DeviceName matches regex \"{{var:device-regex}}\"\n| summarize LastEvent = max(TimeGenerated), Events = count(), Collectors = make_set(Computer, 10) by DeviceVendor, DeviceProduct, DeviceName\n| extend HoursSinceLast = round(datetime_diff(\"minute\", now(), LastEvent) / 60.0, 2)\n| project DeviceVendor, DeviceProduct, DeviceName, LastEvent, HoursSinceLast, Events, Collectors\n| sort by HoursSinceLast desc",
+      "reference": "https://learn.microsoft.com/azure/azure-monitor/reference/tables/commonsecuritylog"
+    }
+  ]
+}
